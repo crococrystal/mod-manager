@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { formatDate } from '../../lib/modMeta.jsx';
 import { ModCover } from './ModCover.jsx';
@@ -22,6 +22,14 @@ function canChangeVersion(mod) {
   );
 }
 
+function isCommandHeld(event) {
+  return event.metaKey || event.ctrlKey;
+}
+
+function applyCmdDragMode(mod, mode, onSelectDrag) {
+  onSelectDrag(mod, mode === 'select');
+}
+
 export function ModTable({
   mods,
   selected,
@@ -29,6 +37,7 @@ export function ModTable({
   sort,
   onSort,
   onSelect,
+  onSelectDrag,
   onCoverClick,
   onSourceClick,
   onVersionClick,
@@ -36,6 +45,14 @@ export function ModTable({
   onDescriptionClick
 }) {
   const wrapRef = useRef(null);
+  const [cmdSelecting, setCmdSelecting] = useState(false);
+  const cmdDragRef = useRef({
+    active: false,
+    dragged: false,
+    mode: 'select',
+    visited: new Set(),
+    startMod: null
+  });
 
   useEffect(() => {
     if (!selected?.filename || !wrapRef.current) return;
@@ -43,8 +60,71 @@ export function ModTable({
     row?.scrollIntoView({ block: 'nearest' });
   }, [selected?.filename]);
 
+  useEffect(() => {
+    function handleMouseUp() {
+      cmdDragRef.current.active = false;
+      setCmdSelecting(false);
+    }
+
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => window.removeEventListener('mouseup', handleMouseUp);
+  }, []);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || !cmdSelecting) return undefined;
+
+    function handleWheel(event) {
+      event.preventDefault();
+    }
+
+    wrap.addEventListener('wheel', handleWheel, { passive: false });
+    return () => wrap.removeEventListener('wheel', handleWheel);
+  }, [cmdSelecting]);
+
+  function handleRowMouseDown(mod, event) {
+    if (event.button !== 0 || !isCommandHeld(event)) return;
+
+    setCmdSelecting(true);
+    cmdDragRef.current = {
+      active: true,
+      dragged: false,
+      mode: selectedKeys?.has(mod.key) ? 'deselect' : 'select',
+      visited: new Set(),
+      startMod: mod
+    };
+  }
+
+  function handleRowMouseEnter(mod, event) {
+    const state = cmdDragRef.current;
+    if (!state.active || !(event.buttons & 1) || !isCommandHeld(event) || !onSelectDrag) return;
+
+    if (!state.dragged) {
+      state.dragged = true;
+      if (state.startMod && !state.visited.has(state.startMod.key)) {
+        state.visited.add(state.startMod.key);
+        applyCmdDragMode(state.startMod, state.mode, onSelectDrag);
+      }
+    }
+
+    if (state.visited.has(mod.key)) return;
+    state.visited.add(mod.key);
+    applyCmdDragMode(mod, state.mode, onSelectDrag);
+  }
+
+  function handleRowClick(mod, event) {
+    if (cmdDragRef.current.dragged) {
+      cmdDragRef.current.dragged = false;
+      return;
+    }
+    onSelect(mod, event);
+  }
+
   return (
-    <div ref={wrapRef} className="tableWrap scrollArea">
+    <div
+      ref={wrapRef}
+      className={`tableWrap scrollArea${cmdSelecting ? ' tableWrapCmdSelecting' : ''}`}
+    >
       <table>
         <thead>
           <tr>
@@ -65,7 +145,9 @@ export function ModTable({
                 key={mod.filename}
                 data-filename={mod.filename}
                 className={active ? 'selected' : ''}
-                onClick={(event) => onSelect(mod, event)}
+                onMouseDown={(event) => handleRowMouseDown(mod, event)}
+                onMouseEnter={(event) => handleRowMouseEnter(mod, event)}
+                onClick={(event) => handleRowClick(mod, event)}
               >
                 <td>
                   <button

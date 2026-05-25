@@ -2,6 +2,8 @@ use reqwest::header::CONTENT_TYPE;
 use std::{
     fs,
     path::{Path, PathBuf},
+    thread,
+    time::Duration,
 };
 
 use tauri::AppHandle;
@@ -12,6 +14,9 @@ use crate::mods::ModEntry;
 use crate::remote::resolve_cover_url;
 use crate::settings::{InstancePaths, Settings};
 use crate::util::{file_mtime_millis, path_string};
+
+pub(crate) const COVER_FETCH_ATTEMPTS: u32 = 3;
+pub(crate) const COVER_FETCH_PAUSE: Duration = Duration::from_secs(1);
 
 pub(crate) const COVER_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "webp", "gif"];
 
@@ -294,6 +299,66 @@ pub(crate) fn cache_remote_cover(
     Some(path)
 }
 
+pub(crate) fn fetch_mod_cover(
+    client: &reqwest::blocking::Client,
+    paths: &InstancePaths,
+    catalog_root: Option<&Path>,
+    item: &ModEntry,
+    settings: &Settings,
+    force_download: bool,
+) -> Option<PathBuf> {
+    for attempt in 0..COVER_FETCH_ATTEMPTS {
+        if let Some(url) = resolve_cover_url(item, client, &settings.curseforge_api_key) {
+            if let Some(path) = cache_remote_cover(
+                client,
+                paths,
+                catalog_root,
+                &item.key,
+                item.modrinth_id.as_deref(),
+                item.curseforge_id.as_deref(),
+                &url,
+                force_download,
+            ) {
+                return Some(path);
+            }
+        }
+        if attempt + 1 < COVER_FETCH_ATTEMPTS {
+            thread::sleep(COVER_FETCH_PAUSE);
+        }
+    }
+    None
+}
+
+pub(crate) fn cache_cover_url_with_retry(
+    client: &reqwest::blocking::Client,
+    paths: &InstancePaths,
+    catalog_root: Option<&Path>,
+    key: &str,
+    modrinth_id: Option<&str>,
+    curseforge_id: Option<&str>,
+    url: &str,
+    force_download: bool,
+) -> Option<PathBuf> {
+    for attempt in 0..COVER_FETCH_ATTEMPTS {
+        if let Some(path) = cache_remote_cover(
+            client,
+            paths,
+            catalog_root,
+            key,
+            modrinth_id,
+            curseforge_id,
+            url,
+            force_download,
+        ) {
+            return Some(path);
+        }
+        if attempt + 1 < COVER_FETCH_ATTEMPTS {
+            thread::sleep(COVER_FETCH_PAUSE);
+        }
+    }
+    None
+}
+
 /// Скачивает обложку с API активного поставщика (после смены source).
 pub(crate) fn refetch_mod_cover_after_source_switch(
     app: &AppHandle,
@@ -316,26 +381,7 @@ pub(crate) fn refetch_mod_cover_after_source_switch(
     remove_cover_prefix_variants(&cache_dir, &all_prefixes);
     remove_cover_variants(&cache_dir, &item.key);
 
-    let Some(url) = resolve_cover_url(item, client, &settings.curseforge_api_key) else {
-        return;
-    };
-
-    let (modrinth_id, curseforge_id) = match item.source.as_str() {
-        "curseforge" => (None, item.curseforge_id.as_deref()),
-        "modrinth" => (item.modrinth_id.as_deref(), None),
-        _ => (item.modrinth_id.as_deref(), item.curseforge_id.as_deref()),
-    };
-
-    if let Some(path) = cache_remote_cover(
-        client,
-        paths,
-        catalog_root,
-        &item.key,
-        modrinth_id,
-        curseforge_id,
-        &url,
-        true,
-    ) {
+    if let Some(path) = fetch_mod_cover(client, paths, catalog_root, item, settings, true) {
         let mtime = file_mtime_millis(&path);
         let stored = path_string(path);
         emit_cover_ready(app, &item.key, &stored, mtime);

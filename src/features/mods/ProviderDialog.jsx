@@ -125,6 +125,8 @@ export function ProviderDialog({
 
   const uiLocked = busy || applying;
   const showList = candidates.length > 0;
+  const hasProviderSource = mod.source === 'modrinth' || mod.source === 'curseforge';
+  const showProviderPageLink = step === 'providers' && hasProviderSource && mod.sourceUrl;
 
   return createPortal(
     <div className="dependencyModalBackdrop" onMouseDown={() => !uiLocked && onClose()}>
@@ -133,19 +135,21 @@ export function ProviderDialog({
           <ModCover mod={mod} size="tile" />
           <div className="dependencyModalHeadText">
             <p className="dependencyModalSubtitle">{mod.displayName}</p>
-            <h3 className="dependencyModalTitle">
-              {step === 'providers' ? 'Поставщик' : providerOptions.find((item) => item.id === platform)?.label}
-            </h3>
+            <div className="dependencyModalTitleRow">
+              <h3 className="dependencyModalTitle">
+                {step === 'providers' ? 'Поставщик' : providerOptions.find((item) => item.id === platform)?.label}
+              </h3>
+              {showProviderPageLink ? (
+                <a className="providerCurrentLink" href={mod.sourceUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink size={14} />
+                  Открыть страницу
+                </a>
+              ) : null}
+            </div>
           </div>
         </div>
 
         {searchError ? <p className="providerSearchError">{searchError}</p> : null}
-        {mod.sourceUrl ? (
-          <a className="providerCurrentLink" href={mod.sourceUrl} target="_blank" rel="noreferrer">
-            <ExternalLink size={14} />
-            Открыть страницу
-          </a>
-        ) : null}
 
         {step === 'providers' ? (
           <div className="dependencyModal providerModal" role="dialog" aria-modal="true" aria-label="Поставщик мода">

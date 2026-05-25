@@ -3,6 +3,11 @@
   overflow: auto;
 }
 
+.tableWrapCmdSelecting {
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
 .tableWrap table,
 .tableWrap table * {
   -webkit-user-select: none;

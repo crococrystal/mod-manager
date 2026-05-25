@@ -7,7 +7,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use crate::instance_meta::{detect_instance_target, InstanceTarget};
+use crate::instance_meta::{
+    detect_instance_target, target_has_filters, version_matches_target, InstanceTarget,
+};
 use crate::mod_names::installed_version_from_filename;
 use crate::mods_watch;
 use crate::remote::{curseforge_get, http_client};
@@ -151,6 +153,12 @@ fn list_versions_blocking(
         }
         _ => unreachable!(),
     };
+
+    if target_has_filters(&target) {
+        versions.retain(|version| {
+            version_matches_target(&version.game_versions, &version.loaders, &target)
+        });
+    }
 
     versions.sort_by(|left, right| right.date_published.cmp(&left.date_published));
     Ok(ProviderVersionsPayload { target, versions })

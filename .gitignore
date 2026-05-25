@@ -35,6 +35,7 @@ Icon?
 # Tauri build / generated
 src-tauri/target
 src-tauri/gen/schemas
+src-tauri/updater.key
 
 # Bundled artifacts collected by CI
 out/

@@ -127,6 +127,35 @@ fn is_loader_segment(segment: &str) -> bool {
     )
 }
 
+pub(crate) fn loader_hint_from_filename(filename: &str) -> Option<String> {
+    let lowered = filename.trim().to_ascii_lowercase();
+    if lowered.contains("fabric-loader") {
+        return Some("fabric".to_string());
+    }
+    if lowered.contains("quilt-loader") {
+        return Some("quilt".to_string());
+    }
+    let stem = filename.trim_end_matches(".jar");
+    for segment in stem.split(&['-', '_']) {
+        if is_loader_segment(segment) {
+            return Some(segment.trim().to_ascii_lowercase());
+        }
+    }
+    None
+}
+
+pub(crate) fn minecraft_version_hint_from_filename(filename: &str) -> Option<String> {
+    let stem = filename.trim_end_matches(".jar");
+    for segment in stem.split(&['-', '_']) {
+        if is_minecraft_version_segment(segment) {
+            let lowered = segment.trim().to_ascii_lowercase();
+            let version = lowered.strip_prefix("mc").unwrap_or(&lowered);
+            return Some(version.to_string());
+        }
+    }
+    None
+}
+
 fn is_minecraft_version_segment(segment: &str) -> bool {
     let lowered = segment.trim().to_ascii_lowercase();
     let version = lowered.strip_prefix("mc").unwrap_or(&lowered);

@@ -37,12 +37,6 @@ function versionMeta(version) {
   return parts.join(' · ');
 }
 
-function normalizeVersion(value) {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase();
-}
-
 function isInstalledVersion(mod, version) {
   if (!mod || !version) return false;
   if (mod.source === 'modrinth' && mod.modrinthVersionId && mod.modrinthVersionId === version.id) {
@@ -52,18 +46,7 @@ function isInstalledVersion(mod, version) {
   if (mod.source === 'curseforge' && mod.curseforgeFileId && mod.curseforgeFileId === fileId) {
     return true;
   }
-  if (mod.filename && version.filename && mod.filename === version.filename) {
-    return true;
-  }
-  const installedVersion = normalizeVersion(mod.installedVersion);
-  const providerVersion = normalizeVersion(version.versionNumber);
-  const providerFilename = normalizeVersion(version.filename);
-  return (
-    installedVersion !== '' &&
-    (installedVersion === providerVersion ||
-      providerVersion.includes(installedVersion) ||
-      providerFilename.includes(installedVersion))
-  );
+  return Boolean(mod.filename && version.filename && mod.filename === version.filename);
 }
 
 export function VersionDialog({ mod, busy, onClose, onInstalled }) {

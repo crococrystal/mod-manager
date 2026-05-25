@@ -173,6 +173,7 @@ function App() {
   const [sort, setSort] = useState({ key: 'name', direction: 'asc' });
   const watcherReloadingRef = useRef(false);
   const watcherReloadPendingRef = useRef(false);
+  const selectionAnchorRef = useRef(null);
 
   const mods = payload?.mods ?? EMPTY_MODS;
   const stats = payload?.stats ?? EMPTY_STATS;
@@ -294,6 +295,7 @@ function App() {
     if (!selected || !visible.some((mod) => mod.filename === selected.filename)) {
       const next = visible[0];
       setSelected(next);
+      selectionAnchorRef.current = next.key;
       setSelectedKeys(new Set([next.key]));
     }
   }, [visible, selected]);
@@ -319,6 +321,7 @@ function App() {
           : (index + delta + visible.length) % visible.length;
       const next = visible[nextIndex];
       setSelected(next);
+      selectionAnchorRef.current = next.key;
       setSelectedKeys(new Set([next.key]));
       setRelationsKey((current) => (current ? next.key : current));
     },
@@ -584,11 +587,63 @@ function App() {
     },
     [mods]
   );
-  const handleTableSelect = useCallback((mod) => {
+  const handleTableSelectDrag = useCallback((mod, select) => {
     setSelected(mod);
-    setSelectedKeys(new Set([mod.key]));
     setRelationsKey((current) => (current ? mod.key : current));
+    selectionAnchorRef.current = mod.key;
+    setSelectedKeys((current) => {
+      if (select) {
+        if (current.has(mod.key)) return current;
+        const next = new Set(current);
+        next.add(mod.key);
+        return next;
+      }
+      if (!current.has(mod.key)) return current;
+      const next = new Set(current);
+      next.delete(mod.key);
+      return next;
+    });
   }, []);
+
+  const handleTableSelect = useCallback(
+    (mod, event) => {
+      setSelected(mod);
+      setRelationsKey((current) => (current ? mod.key : current));
+
+      if (event?.shiftKey) {
+        const anchorKey = selectionAnchorRef.current ?? selected?.key;
+        if (anchorKey) {
+          const anchorIndex = visible.findIndex((item) => item.key === anchorKey);
+          const targetIndex = visible.findIndex((item) => item.key === mod.key);
+          if (anchorIndex >= 0 && targetIndex >= 0) {
+            const start = Math.min(anchorIndex, targetIndex);
+            const end = Math.max(anchorIndex, targetIndex);
+            setSelectedKeys(new Set(visible.slice(start, end + 1).map((item) => item.key)));
+            return;
+          }
+        }
+      }
+
+      const command = event?.metaKey || event?.ctrlKey;
+      if (command) {
+        selectionAnchorRef.current = mod.key;
+        setSelectedKeys((current) => {
+          const next = new Set(current);
+          if (next.has(mod.key)) {
+            next.delete(mod.key);
+          } else {
+            next.add(mod.key);
+          }
+          return next;
+        });
+        return;
+      }
+
+      selectionAnchorRef.current = mod.key;
+      setSelectedKeys(new Set([mod.key]));
+    },
+    [visible, selected?.key]
+  );
 
   const progressPercent =
     progress?.total > 0 ? Math.min(100, Math.round((progress.index / progress.total) * 100)) : 0;
@@ -676,6 +731,7 @@ function App() {
               sort={sort}
               onSort={handleSort}
               onSelect={handleTableSelect}
+              onSelectDrag={handleTableSelectDrag}
               onCoverClick={openRelationsForMod}
               onSourceClick={(mod) => setProviderKey(mod.key)}
               onVersionClick={(mod) => setVersionKey(mod.key)}

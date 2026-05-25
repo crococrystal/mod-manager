@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::PathBuf};
 use tauri::AppHandle;
 
 use crate::catalog;
-use crate::covers::{apply_existing_cover, cache_remote_cover};
+use crate::covers::{apply_existing_cover, fetch_mod_cover};
 use crate::dependencies::same_dependency_list;
 use crate::events::{
     emit_cover_ready, emit_dependencies_ready, emit_prefetch_done, emit_prefetch_progress,
@@ -13,7 +13,7 @@ use crate::file_identity::read_file_identity;
 use crate::mods::{merge_keys, scan_mods_for_settings};
 use crate::remote::{
     curseforge_fingerprint_matches, curseforge_mod_info, fetch_api_dependencies, http_client,
-    modrinth_versions_by_sha512, resolve_cover_url,
+    modrinth_versions_by_sha512,
 };
 use crate::settings::{resolve_paths, Settings};
 use crate::tags::{read_tags, write_tags};
@@ -154,27 +154,21 @@ pub(crate) fn prefetch_mod_assets_for_settings(
             if item.cover_path.is_some() {
                 report.skipped += 1;
             } else if item.modrinth_id.is_some() || item.curseforge_id.is_some() {
-                if let Some(url) = resolve_cover_url(item, &client, &settings.curseforge_api_key) {
-                    if let Some(path) = cache_remote_cover(
-                        &client,
-                        &paths,
-                        catalog_root.as_deref(),
-                        &item.key,
-                        item.modrinth_id.as_deref(),
-                        item.curseforge_id.as_deref(),
-                        &url,
-                        false,
-                    ) {
-                        let mtime = file_mtime_millis(&path);
-                        let stored = path_string(path);
-                        emit_cover_ready(app, &item.key, &stored, mtime);
-                        item.cover_modified_at = mtime;
-                        item.cover_path = Some(stored);
-                        item.cover_manual = false;
-                        report.downloaded += 1;
-                    } else {
-                        report.failed += 1;
-                    }
+                if let Some(path) = fetch_mod_cover(
+                    &client,
+                    &paths,
+                    catalog_root.as_deref(),
+                    item,
+                    settings,
+                    false,
+                ) {
+                    let mtime = file_mtime_millis(&path);
+                    let stored = path_string(path);
+                    emit_cover_ready(app, &item.key, &stored, mtime);
+                    item.cover_modified_at = mtime;
+                    item.cover_path = Some(stored);
+                    item.cover_manual = false;
+                    report.downloaded += 1;
                 } else {
                     report.failed += 1;
                 }

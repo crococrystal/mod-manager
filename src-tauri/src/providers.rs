@@ -5,7 +5,7 @@ use tauri::AppHandle;
 
 use crate::catalog;
 use crate::covers::{
-    apply_existing_cover, cache_remote_cover, refetch_mod_cover_after_source_switch,
+    apply_existing_cover, cache_cover_url_with_retry, refetch_mod_cover_after_source_switch,
 };
 use crate::events::{emit_cover_ready, emit_mod_source_ready};
 use crate::file_identity::read_file_identity;
@@ -505,7 +505,7 @@ fn refetch_switch_cover(
     }
 
     if let Some(url) = followup.icon_url.as_deref() {
-        if let Some(path) = cache_remote_cover(
+        if let Some(path) = cache_cover_url_with_retry(
             client,
             &followup.paths,
             followup.catalog_root.as_deref(),

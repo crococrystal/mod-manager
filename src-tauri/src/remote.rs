@@ -48,7 +48,7 @@ pub(crate) struct ProviderProject {
 pub(crate) fn http_client() -> Option<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
-        .user_agent("mod-manager/0.1.0")
+        .user_agent("mod-manager/0.1.2")
         .build()
         .ok()
 }
@@ -56,7 +56,7 @@ pub(crate) fn http_client() -> Option<reqwest::blocking::Client> {
 pub(crate) fn search_http_client() -> Option<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
-        .user_agent("mod-manager/0.1.0")
+        .user_agent("mod-manager/0.1.2")
         .build()
         .ok()
 }

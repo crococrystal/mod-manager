@@ -6,8 +6,11 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+env:
+  RELEASES_REPO: crococrystal/mod-manager-releases
+
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: build-${{ github.ref }}
@@ -22,13 +25,15 @@ jobs:
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
           - name: windows-x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             bundles: nsis
 
     runs-on: ${{ matrix.os }}
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,14 +63,18 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           mkdir -p out
-          cp -R "src-tauri/target/${{ matrix.target }}/release/bundle/dmg/"*.dmg out/ || true
+          bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
+          cp -R "${bundle}/dmg/"*.dmg out/ 2>/dev/null || true
+          find "${bundle}" -type f \( -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' -o -name '*.sig' \) -exec cp {} out/ \; 2>/dev/null || true
 
       - name: Collect artifacts (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          Copy-Item "src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe" out/ -ErrorAction SilentlyContinue
+          $bundle = "src-tauri/target/${{ matrix.target }}/release/bundle"
+          Copy-Item "$bundle/nsis/*-setup.exe" out/ -ErrorAction SilentlyContinue
+          Copy-Item "$bundle/nsis/*.sig" out/ -ErrorAction SilentlyContinue
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -86,39 +95,93 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Generate latest.json
+        id: latest_json
+        env:
+          UPDATE_NOTES: Automatically updated from crococrystal/mod-manager@${{ github.sha }}.
+        run: |
+          chmod +x scripts/generate-latest-json.sh
+          if ./scripts/generate-latest-json.sh artifacts artifacts/latest.json; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "No signed updater bundles in artifacts; latest.json skipped." >&2
+            ls -laR artifacts || true
+          fi
+
       - name: Publish latest release
         if: github.ref == 'refs/heads/main'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          RELEASES_REPO: ${{ env.RELEASES_REPO }}
+          SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          git tag -f latest "${GITHUB_SHA}"
-          git push origin latest --force
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "Missing RELEASES_REPO_TOKEN secret."
+            exit 1
+          fi
 
-          if gh release view latest >/dev/null 2>&1; then
+          notes="Automatically updated from crococrystal/mod-manager@${SOURCE_SHA}."
+
+          if gh release view latest --repo "${RELEASES_REPO}" >/dev/null 2>&1; then
             gh release edit latest \
+              --repo "${RELEASES_REPO}" \
               --title "Latest build" \
-              --notes "Automatically updated from main at ${GITHUB_SHA}." \
+              --notes "${notes}" \
               --latest
           else
             gh release create latest \
+              --repo "${RELEASES_REPO}" \
               --title "Latest build" \
-              --notes "Automatically updated from main at ${GITHUB_SHA}." \
-              --latest
+              --notes "${notes}" \
+              --latest \
+              --target main
           fi
 
-          gh release view latest --json assets --jq '.assets[].name' | while read -r asset; do
+          gh release view latest --repo "${RELEASES_REPO}" --json assets --jq '.assets[].name' | while read -r asset; do
             [ -z "$asset" ] && continue
-            gh release delete-asset latest "$asset" -y
+            gh release delete-asset latest "$asset" --repo "${RELEASES_REPO}" -y
           done
 
           mapfile -d '' files < <(find artifacts -type f -print0)
-          gh release upload latest "${files[@]}" --clobber
+          gh release upload latest "${files[@]}" --repo "${RELEASES_REPO}" --clobber
+
+          if [ "${{ steps.latest_json.outputs.ready }}" != "true" ]; then
+            echo "Release published without latest.json — in-app updates will not work until the next signed build." >&2
+            exit 1
+          fi
 
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/**/*
-          generate_release_notes: true
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_REPO_TOKEN }}
+          RELEASES_REPO: ${{ env.RELEASES_REPO }}
+          TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+          UPDATE_NOTES: Built from crococrystal/mod-manager@${{ github.sha }}.
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "Missing RELEASES_REPO_TOKEN secret."
+            exit 1
+          fi
+
+          chmod +x scripts/generate-latest-json.sh
+          RELEASE_BASE="https://github.com/${RELEASES_REPO}/releases/download/${TAG}" \
+            ./scripts/generate-latest-json.sh artifacts "artifacts/latest-${TAG}.json" || true
+
+          if gh release view "${TAG}" --repo "${RELEASES_REPO}" >/dev/null 2>&1; then
+            gh release delete "${TAG}" --repo "${RELEASES_REPO}" -y --cleanup-tag
+          fi
+
+          mapfile -d '' files < <(find artifacts -type f -print0)
+          gh release create "${TAG}" \
+            --repo "${RELEASES_REPO}" \
+            --title "${TAG}" \
+            --notes "Built from crococrystal/mod-manager@${SOURCE_SHA}." \
+            --latest \
+            --target main \
+            "${files[@]}"

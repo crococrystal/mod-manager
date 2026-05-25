@@ -132,20 +132,22 @@ pub(crate) async fn bootstrap_instance(
             let run_covers = plan_covers && settings.auto_prefetch_covers;
             let run_dependencies = plan_dependencies && settings.auto_prefetch_dependencies;
 
+            let mut covers_prepared = false;
             if run_covers || run_dependencies {
-                prefetch_mod_assets_for_settings(
+                let report = prefetch_mod_assets_for_settings(
                     &settings,
                     &app_handle,
                     run_covers,
                     run_dependencies,
                 )?;
+                covers_prepared = !run_covers || report.failed == 0;
             }
 
             instance_registry::mark_prepared(
                 &mut registry,
                 &paths.instance_root,
                 &fingerprint,
-                run_covers,
+                covers_prepared,
                 run_dependencies,
                 &now,
             );

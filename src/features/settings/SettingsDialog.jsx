@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Folder, FolderOpen, Info, RefreshCw } from 'lucide-react';
+import { getVersion } from '@tauri-apps/api/app';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Button } from '../../components/Button.jsx';
 import { Modal } from '../../components/Modal.jsx';
 import { NoticeModal } from '../../components/NoticeModal.jsx';
 import { clearAppData } from '../../api.js';
+import { canCheckForUpdates, checkForAppUpdate, installAppUpdate } from '../../lib/updater.js';
 
 function toSettings(draft) {
   return {
@@ -45,6 +47,8 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
   const [message, setMessage] = useState('');
   const [clearConfirm, setClearConfirm] = useState(null);
   const [clearing, setClearing] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
+  const [updateStatus, setUpdateStatus] = useState('idle');
 
   const hasPack = Boolean(draft.instanceRoot);
   const cacheStatus = settings?.cacheStatus;
@@ -56,6 +60,35 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
   useEffect(() => {
     setDraft(settings ?? {});
   }, [settings]);
+
+  useEffect(() => {
+    if (!canCheckForUpdates()) return;
+    void getVersion()
+      .then((version) => setAppVersion(version))
+      .catch(() => {});
+  }, []);
+
+  async function checkUpdates() {
+    if (!canCheckForUpdates()) return;
+    setUpdateStatus('checking');
+    setMessage('');
+    try {
+      const update = await checkForAppUpdate();
+      if (!update) {
+        setUpdateStatus('idle');
+        return;
+      }
+      setUpdateStatus('installing');
+      await installAppUpdate(update);
+    } catch (err) {
+      setUpdateStatus('idle');
+      setMessage(String(err));
+    }
+  }
+
+  const updateBusy = updateStatus === 'checking' || updateStatus === 'installing';
+  const updateLabel =
+    updateStatus === 'checking' ? '…' : updateStatus === 'installing' ? 'Загрузка' : 'Обновить';
 
   async function pickFolder() {
     const selected = await open({
@@ -98,7 +131,7 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
     }
   }
 
-  const uiBusy = busy || clearing;
+  const uiBusy = busy || clearing || updateBusy;
 
   return (
     <Modal
@@ -180,6 +213,20 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
                 </li>
               ))}
             </ul>
+          </div>
+        ) : null}
+
+        {canCheckForUpdates() ? (
+          <div className="settingsUpdateBar">
+            <span className="settingsUpdateVersion">{appVersion || '—'}</span>
+            <button
+              type="button"
+              className="settingsUpdateAction"
+              onClick={checkUpdates}
+              disabled={uiBusy}
+            >
+              {updateLabel}
+            </button>
           </div>
         ) : null}
 
