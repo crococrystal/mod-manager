@@ -3,14 +3,11 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
-use tauri::AppHandle;
 
 use crate::catalog;
-use crate::events::{emit_cover_ready, emit_prefetch_done, emit_prefetch_progress, PrefetchReport};
-use crate::mods::{scan_mods_for_settings, ModEntry};
-use crate::remote::{http_client, resolve_cover_url};
-use crate::settings::{resolve_paths, InstancePaths, Settings};
-use crate::util::path_string;
+use crate::mods::ModEntry;
+use crate::settings::InstancePaths;
+use crate::util::{file_mtime_millis, path_string};
 
 pub(crate) const COVER_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "webp", "gif"];
 
@@ -175,6 +172,7 @@ pub(crate) fn apply_existing_cover(
     if let Some(path) = find_cover_by_prefix(&manual_dir, &manual_hash)
         .or_else(|| find_cover_file(&manual_dir, &item.key))
     {
+        item.cover_modified_at = file_mtime_millis(&path);
         item.cover_path = Some(path_string(path));
         item.cover_manual = true;
         return;
@@ -182,6 +180,7 @@ pub(crate) fn apply_existing_cover(
 
     let cache_dir = cover_dir(&paths.data_root, false);
     if let Some(path) = find_cover_in_dir(&cache_dir, &prefixes, &item.key) {
+        item.cover_modified_at = file_mtime_millis(&path);
         item.cover_path = Some(path_string(path));
         item.cover_manual = false;
         return;
@@ -190,6 +189,7 @@ pub(crate) fn apply_existing_cover(
     if let Some(root) = catalog_root {
         for prefix in &prefixes {
             if let Some(path) = catalog::find_catalog_cover(root, prefix) {
+                item.cover_modified_at = file_mtime_millis(&path);
                 item.cover_path = Some(path_string(path));
                 item.cover_manual = false;
                 return;
@@ -198,7 +198,34 @@ pub(crate) fn apply_existing_cover(
     }
 }
 
-fn cache_remote_cover(
+pub(crate) fn delete_manual_cover(paths: &InstancePaths, key: &str) -> Result<bool, String> {
+    let dir = cover_dir(&paths.data_root, true);
+    if !dir.exists() {
+        return Ok(false);
+    }
+    let hash = hash_cover_key(key);
+    let mut removed = false;
+    let entries = std::fs::read_dir(&dir).map_err(|error| error.to_string())?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if !has_cover_extension(&name) {
+            continue;
+        }
+        let matches_hash =
+            name.starts_with(&hash.to_ascii_lowercase()) && {
+                let suffix = name.trim_start_matches(&hash.to_ascii_lowercase());
+                suffix.starts_with('.') || suffix.starts_with('_')
+            };
+        if matches_hash {
+            let _ = std::fs::remove_file(entry.path());
+            removed = true;
+        }
+    }
+    remove_cover_variants(&dir, key);
+    Ok(removed)
+}
+
+pub(crate) fn cache_remote_cover(
     client: &reqwest::blocking::Client,
     paths: &InstancePaths,
     catalog_root: Option<&Path>,
@@ -257,80 +284,6 @@ fn cache_remote_cover(
     let path = dir.join(format!("{}.{}", safe_file_stem(key), ext));
     fs::write(&path, &bytes).ok()?;
     Some(path)
-}
-
-pub(crate) fn prefetch_covers_for_settings(
-    settings: &Settings,
-    app: &AppHandle,
-) -> Result<PrefetchReport, String> {
-    let paths = resolve_paths(settings)?;
-    let catalog_root = catalog::catalog_root(app).ok();
-    let mut mods = scan_mods_for_settings(settings, catalog_root.clone())?;
-    let Some(client) = http_client() else {
-        return Err("Не удалось создать HTTP-клиент.".to_string());
-    };
-
-    let mut report = PrefetchReport::new();
-    let total = mods.len() as u32;
-    for (index, item) in mods.iter_mut().enumerate() {
-        let step = index as u32 + 1;
-        emit_prefetch_progress(app, "covers", step, total, &item.display_name, "fetch", "");
-
-        apply_existing_cover(item, &paths, catalog_root.as_deref());
-        if item.cover_path.is_some() {
-            report.skipped += 1;
-            emit_prefetch_progress(app, "covers", step, total, &item.display_name, "skip", "уже в кэше");
-            continue;
-        }
-        if item.modrinth_id.is_none() && item.curseforge_id.is_none() {
-            report.skipped += 1;
-            emit_prefetch_progress(app, "covers", step, total, &item.display_name, "skip", "сторонний мод");
-            continue;
-        }
-
-        let url = resolve_cover_url(item, &client, &settings.curseforge_api_key);
-        let Some(url) = url else {
-            report.failed += 1;
-            if report.errors.len() < 12 {
-                report
-                    .errors
-                    .push(format!("{}: обложка не найдена", item.display_name));
-            }
-            emit_prefetch_progress(app, "covers", step, total, &item.display_name, "fail", "не найдено");
-            continue;
-        };
-
-        match cache_remote_cover(
-            &client,
-            &paths,
-            catalog_root.as_deref(),
-            &item.key,
-            item.modrinth_id.as_deref(),
-            item.curseforge_id.as_deref(),
-            &url,
-        ) {
-            Some(path) => {
-                let stored = path_string(path);
-                emit_cover_ready(app, &item.key, &stored);
-                item.cover_path = Some(stored);
-                item.cover_manual = false;
-                report.downloaded += 1;
-                emit_prefetch_progress(app, "covers", step, total, &item.display_name, "ok", "скачано");
-            }
-            None => {
-                report.failed += 1;
-                if report.errors.len() < 12 {
-                    report
-                        .errors
-                        .push(format!("{}: не удалось скачать", item.display_name));
-                }
-                emit_prefetch_progress(app, "covers", step, total, &item.display_name, "fail", "ошибка");
-            }
-        }
-    }
-
-    emit_prefetch_done(app, "covers");
-    Ok(report)
 }
 
 pub(crate) fn store_uploaded_cover(

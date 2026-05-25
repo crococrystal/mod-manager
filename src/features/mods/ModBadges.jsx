@@ -14,7 +14,7 @@ export function TagMark({ mod }) {
   );
 }
 
-export function SourceIcon({ mod, linked = false }) {
+export function SourceIcon({ mod, linked = false, onClick }) {
   const item = sourceIcons[mod.source] ?? sourceIcons.manual;
   const needsAttention = mod.duplicate || !mod.hasTags;
   const label = needsAttention ? `${item.label}: проверить` : item.label;
@@ -24,6 +24,20 @@ export function SourceIcon({ mod, linked = false }) {
       {needsAttention ? <AlertTriangle size={13} /> : null}
     </>
   );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className="sourceIcon sourceIconButton"
+        onClick={onClick}
+        title={`Поставщик: ${label}`}
+        aria-label={`Поставщик: ${label}`}
+      >
+        {content}
+      </button>
+    );
+  }
 
   if (linked && mod.sourceUrl) {
     return (

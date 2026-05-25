@@ -1,12 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Wrench } from 'lucide-react';
+import { BookOpen, RotateCcw, Wrench } from 'lucide-react';
 import { sideOptions } from '../../lib/modMeta.jsx';
 import { mergeDependencyKeys } from '../../lib/usedBy.js';
 import { ModRelations } from '../relations/ModRelations.jsx';
 import { ModCover } from './ModCover.jsx';
 import { ModPageLink } from './ModBadges.jsx';
 
-export function ModEditor({ mod, mods, busy, onPatch, onUploadCover, onSelectMod }) {
+export function ModEditor({
+  mod,
+  mods,
+  busy,
+  onPatch,
+  onUploadCover,
+  onDeleteCover,
+  onSelectMod,
+  onOpenRelations,
+  onCloseRelations,
+  relationsOpenKey
+}) {
   const coverInputRef = useRef(null);
   const currentSide = mod.side === 'unknown' ? 'universal' : mod.side;
   const [description, setDescription] = useState(mod.description ?? '');
@@ -66,13 +77,30 @@ export function ModEditor({ mod, mods, busy, onPatch, onUploadCover, onSelectMod
   return (
     <div className="editor scrollArea">
       <div className="editorHero">
-        <ModCover
-          key={mod.key}
-          mod={mod}
-          size="hero"
-          title="Нажми, чтобы загрузить обложку"
-          onClick={() => !busy && coverInputRef.current?.click()}
-        />
+        <div className="editorCoverFrame">
+          <ModCover
+            key={mod.key}
+            mod={mod}
+            size="hero"
+            title="Нажми, чтобы загрузить обложку"
+            onClick={() => !busy && coverInputRef.current?.click()}
+          />
+          {mod.coverManual && onDeleteCover ? (
+            <button
+              type="button"
+              className="coverResetIcon"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDeleteCover(mod.key);
+              }}
+              disabled={busy}
+              title="Сбросить кастомную обложку"
+              aria-label="Сбросить кастомную обложку"
+            >
+              <RotateCcw size={14} />
+            </button>
+          ) : null}
+        </div>
         <h2>{mod.displayName}</h2>
         <input ref={coverInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={uploadCover} hidden />
       </div>
@@ -131,6 +159,9 @@ export function ModEditor({ mod, mods, busy, onPatch, onUploadCover, onSelectMod
         busy={busy}
         onChange={handleDependenciesChange}
         onSelectMod={onSelectMod}
+        onOpenRelations={onOpenRelations}
+        onCloseRelations={onCloseRelations}
+        relationsOpenKey={relationsOpenKey}
       />
     </div>
   );

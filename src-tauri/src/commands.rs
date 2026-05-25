@@ -3,10 +3,14 @@ use serde::Deserialize;
 use tauri::AppHandle;
 
 use crate::catalog;
-use crate::covers::{cover_ext_from_mime, prefetch_covers_for_settings, store_uploaded_cover};
-use crate::dependencies::prefetch_dependencies_for_settings;
+use crate::covers::{
+    cover_ext_from_mime, delete_manual_cover, store_uploaded_cover,
+};
 use crate::instance_registry;
 use crate::mods::{normalize_side, scan_mods_for_settings, stats_for, ModListPayload};
+use crate::mods_watch;
+use crate::prefetch::prefetch_mod_assets_for_settings;
+use crate::remote::{curseforge_search_mod, http_client, modrinth_search_project};
 use crate::settings::{
     read_settings, remember_instance, resolve_paths, settings_view, write_settings, Settings,
     SettingsView,
@@ -25,6 +29,13 @@ pub(crate) struct UpdateModTagsRequest {
     pub dependencies: Option<Vec<String>>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SwitchModSourceRequest {
+    pub key: String,
+    pub source: String,
+}
+
 #[tauri::command]
 pub(crate) fn get_settings(app: AppHandle) -> Result<SettingsView, String> {
     let settings = read_settings(&app)?;
@@ -40,6 +51,11 @@ pub(crate) fn save_settings(
         remember_instance(&mut settings, &root);
     }
     write_settings(&app, &settings)?;
+    if let Ok(paths) = resolve_paths(&settings) {
+        mods_watch::sync_mods_watch(&app, Some(paths.mods_dir));
+    } else {
+        mods_watch::sync_mods_watch(&app, None);
+    }
     settings_view(&app, settings)
 }
 
@@ -96,11 +112,13 @@ pub(crate) async fn bootstrap_instance(
             let run_covers = plan_covers && settings.auto_prefetch_covers;
             let run_dependencies = plan_dependencies && settings.auto_prefetch_dependencies;
 
-            if run_covers {
-                prefetch_covers_for_settings(&settings, &app_handle)?;
-            }
-            if run_dependencies {
-                prefetch_dependencies_for_settings(&settings, &app_handle)?;
+            if run_covers || run_dependencies {
+                prefetch_mod_assets_for_settings(
+                    &settings,
+                    &app_handle,
+                    run_covers,
+                    run_dependencies,
+                )?;
             }
 
             instance_registry::mark_prepared(
@@ -170,6 +188,73 @@ pub(crate) async fn update_mod_tags(
 }
 
 #[tauri::command]
+pub(crate) async fn switch_mod_source(
+    app: AppHandle,
+    request: SwitchModSourceRequest,
+) -> Result<ModListPayload, String> {
+    let target = request.source.trim().to_ascii_lowercase();
+    if target != "modrinth" && target != "curseforge" {
+        return Err("Можно выбрать только Modrinth или CurseForge.".to_string());
+    }
+
+    let settings = read_settings(&app)?;
+    let paths = resolve_paths(&settings)?;
+    let catalog_root = catalog::catalog_root(&app).ok();
+    let mods = scan_mods_for_settings(&settings, catalog_root.clone())?;
+    let selected = mods
+        .iter()
+        .find(|item| item.key == request.key)
+        .ok_or_else(|| "Мод не найден в текущей сборке.".to_string())?;
+
+    let client = http_client().ok_or_else(|| "Не удалось создать HTTP-клиент.".to_string())?;
+    let mut tags = read_tags(&paths.tags_path)?;
+    let tag = tags.mods.entry(request.key.clone()).or_default();
+
+    match target.as_str() {
+        "modrinth" => {
+            if selected.modrinth_id.is_none() && tag.modrinth_id.trim().is_empty() {
+                let project = modrinth_search_project(&client, &selected.display_name)
+                    .ok_or_else(|| "Мод не найден на Modrinth.".to_string())?;
+                tag.modrinth_id = project.id;
+            }
+        }
+        "curseforge" => {
+            if selected.curseforge_id.is_none() && tag.curseforge_id.trim().is_empty() {
+                if settings.curseforge_api_key.trim().is_empty() {
+                    return Err("Для поиска на CurseForge нужен API key.".to_string());
+                }
+                let project = curseforge_search_mod(
+                    &client,
+                    &settings.curseforge_api_key,
+                    &selected.display_name,
+                )
+                .ok_or_else(|| "Мод не найден на CurseForge.".to_string())?;
+                tag.curseforge_id = project.id;
+                tag.curseforge_slug = project.slug.unwrap_or_default();
+            }
+        }
+        _ => unreachable!(),
+    }
+
+    tag.source = target;
+    tag.updated_at = now_iso();
+    tags.updated_at = now_iso();
+    write_tags(&paths.tags_path, &tags)?;
+
+    let view = settings_view(&app, settings.clone())?;
+    let mods =
+        tauri::async_runtime::spawn_blocking(move || scan_mods_for_settings(&settings, catalog_root))
+            .await
+            .map_err(|error| format!("Сканирование прервано: {error}"))??;
+    let stats = stats_for(&mods);
+    Ok(ModListPayload {
+        settings: view,
+        mods,
+        stats,
+    })
+}
+
+#[tauri::command]
 pub(crate) async fn upload_cover(
     app: AppHandle,
     key: String,
@@ -196,6 +281,29 @@ pub(crate) async fn upload_cover(
     }
 
     store_uploaded_cover(&paths, &key, &bytes, ext)?;
+
+    let catalog_root = catalog::catalog_root(&app).ok();
+    let view = settings_view(&app, settings.clone())?;
+    let mods =
+        tauri::async_runtime::spawn_blocking(move || scan_mods_for_settings(&settings, catalog_root))
+            .await
+            .map_err(|error| format!("Сканирование прервано: {error}"))??;
+    let stats = stats_for(&mods);
+    Ok(ModListPayload {
+        settings: view,
+        mods,
+        stats,
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn delete_custom_cover(
+    app: AppHandle,
+    key: String,
+) -> Result<ModListPayload, String> {
+    let settings = read_settings(&app)?;
+    let paths = resolve_paths(&settings)?;
+    delete_manual_cover(&paths, &key)?;
 
     let catalog_root = catalog::catalog_root(&app).ok();
     let view = settings_view(&app, settings.clone())?;

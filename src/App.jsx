@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Search, Settings, SlidersHorizontal } from 'lucide-react';
 import {
   bootstrapInstance,
+  deleteCustomCover,
   getSettings,
   saveSettings,
   scanMods,
+  switchModSource,
   updateModTags,
   uploadCover
 } from './api.js';
@@ -15,6 +17,7 @@ import { TitleBar } from './components/TitleBar.jsx';
 import { NoticeModal } from './components/NoticeModal.jsx';
 import { ModEditor } from './features/mods/ModEditor.jsx';
 import { ModTable } from './features/mods/ModTable.jsx';
+import { ProviderDialog } from './features/mods/ProviderDialog.jsx';
 import { SettingsDialog } from './features/settings/SettingsDialog.jsx';
 import { filters } from './lib/modMeta.jsx';
 import { normalizeModsGraph } from './lib/usedBy.js';
@@ -26,10 +29,16 @@ function needsBootstrap(cacheStatus, { force = false } = {}) {
   return cacheStatus.needsCovers || cacheStatus.needsDependencies;
 }
 
+function coverUrlFor(mod) {
+  if (!mod.coverPath) return mod.coverUrl ?? null;
+  const base = convertFileSrc(mod.coverPath);
+  return mod.coverModifiedAt ? `${base}?v=${mod.coverModifiedAt}` : base;
+}
+
 function withLocalCovers(next) {
   const mods = (next.mods ?? []).map((mod) => ({
     ...mod,
-    coverUrl: mod.coverPath ? convertFileSrc(mod.coverPath) : mod.coverUrl ?? null
+    coverUrl: coverUrlFor(mod)
   }));
   normalizeModsGraph(mods);
   return { ...next, mods };
@@ -56,6 +65,9 @@ function App() {
   const [info, setInfo] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [progress, setProgress] = useState(null);
+  const [providerKey, setProviderKey] = useState(null);
+  const watcherReloadingRef = useRef(false);
+  const watcherReloadPendingRef = useRef(false);
 
   const mods = payload?.mods ?? [];
   const stats = payload?.stats ?? {};
@@ -86,6 +98,22 @@ function App() {
     });
   }, []);
 
+  const updateModInPayload = useCallback((key, patch) => {
+    setPayload((current) => {
+      if (!current) return current;
+      let touched = false;
+      const mods = current.mods.map((mod) => {
+        if (mod.key !== key) return mod;
+        touched = true;
+        return { ...mod, ...patch };
+      });
+      if (!touched) return current;
+      normalizeModsGraph(mods);
+      return { ...current, mods };
+    });
+    setSelected((current) => (current?.key === key ? { ...current, ...patch } : current));
+  }, []);
+
   const loadSettings = useCallback(async () => {
     const next = await getSettings();
     setSettings(next);
@@ -97,7 +125,7 @@ function App() {
       if (!silent) {
         setBusy(true);
         setError('');
-        if (!bootstrapping) setInfo('');
+        setInfo('');
       }
       try {
         const next = await scanMods();
@@ -108,7 +136,7 @@ function App() {
         if (!silent) setBusy(false);
       }
     },
-    [applyPayload, bootstrapping]
+    [applyPayload]
   );
 
   const runBootstrap = useCallback(
@@ -147,7 +175,7 @@ function App() {
         }
       })
       .catch((err) => setError(String(err)));
-  }, [loadSettings, reload, runBootstrap]);
+  }, [loadSettings, runBootstrap]);
 
   useEffect(() => {
     if (!visible.length) {
@@ -169,7 +197,9 @@ function App() {
             ? 0
             : visible.length - 1
           : (index + delta + visible.length) % visible.length;
-      setSelected(visible[nextIndex]);
+      const next = visible[nextIndex];
+      setSelected(next);
+      setRelationsKey((current) => (current ? next.key : current));
     },
     [visible, selected]
   );
@@ -190,8 +220,33 @@ function App() {
   }, [moveSelection]);
 
   useEffect(() => {
+    let unlistenMods;
+    (async () => {
+      unlistenMods = await listen('mods-folder-changed', async () => {
+        if (bootstrapping) return;
+        if (watcherReloadingRef.current) {
+          watcherReloadPendingRef.current = true;
+          return;
+        }
+
+        watcherReloadingRef.current = true;
+        try {
+          do {
+            watcherReloadPendingRef.current = false;
+            await reload({ silent: true });
+          } while (watcherReloadPendingRef.current && !bootstrapping);
+        } finally {
+          watcherReloadingRef.current = false;
+        }
+      });
+    })();
+    return () => unlistenMods?.();
+  }, [reload, bootstrapping]);
+
+  useEffect(() => {
     let unlistenProgress;
     let unlistenCover;
+    let unlistenDependencies;
     (async () => {
       unlistenProgress = await listen('prefetch-progress', (event) => {
         const payload = event.payload;
@@ -202,30 +257,24 @@ function App() {
         setProgress(payload);
       });
       unlistenCover = await listen('cover-ready', (event) => {
-        const { key, coverPath } = event.payload ?? {};
+        const { key, coverPath, coverModifiedAt } = event.payload ?? {};
         if (!key || !coverPath) return;
-        const coverUrl = convertFileSrc(coverPath);
-        setPayload((current) => {
-          if (!current) return current;
-          let touched = false;
-          const mods = current.mods.map((mod) => {
-            if (mod.key !== key) return mod;
-            touched = true;
-            return { ...mod, coverPath, coverUrl };
-          });
-          return touched ? { ...current, mods } : current;
-        });
-        setSelected((current) => {
-          if (!current || current.key !== key) return current;
-          return { ...current, coverPath, coverUrl };
-        });
+        const base = convertFileSrc(coverPath);
+        const coverUrl = coverModifiedAt ? `${base}?v=${coverModifiedAt}` : base;
+        updateModInPayload(key, { coverPath, coverUrl, coverModifiedAt, coverManual: false });
+      });
+      unlistenDependencies = await listen('dependencies-ready', (event) => {
+        const { key, dependencies } = event.payload ?? {};
+        if (!key || !Array.isArray(dependencies)) return;
+        updateModInPayload(key, { dependencies });
       });
     })();
     return () => {
       unlistenProgress?.();
       unlistenCover?.();
+      unlistenDependencies?.();
     };
-  }, []);
+  }, [updateModInPayload]);
 
   const handleSaveSettings = useCallback(
     async (nextSettings, options = {}) => {
@@ -250,23 +299,6 @@ function App() {
       }
     },
     [applyPayload, runBootstrap]
-  );
-
-  const handleRefreshSettings = useCallback(
-    async (nextSettings) => {
-      setBusy(true);
-      setError('');
-      try {
-        const saved = await saveSettings(nextSettings);
-        setSettings(saved);
-        await reload();
-      } catch (err) {
-        setError(String(err));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [reload]
   );
 
   const patchMod = useCallback(
@@ -301,14 +333,73 @@ function App() {
     [applyPayload]
   );
 
+  const handleDeleteCover = useCallback(
+    async (key) => {
+      setBusy(true);
+      setError('');
+      try {
+        const next = await deleteCustomCover(key);
+        applyPayload(next);
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyPayload]
+  );
+
+  const handleSwitchSource = useCallback(
+    async (source) => {
+      if (!providerKey) return;
+      setBusy(true);
+      setError('');
+      try {
+        const next = await switchModSource({ key: providerKey, source });
+        applyPayload(next);
+        setProviderKey(null);
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyPayload, providerKey]
+  );
+
+  const [relationsKey, setRelationsKey] = useState(null);
+  const openRelationsForMod = useCallback((mod) => {
+    if (!mod) return;
+    setSelected(mod);
+    setRelationsKey(mod.key);
+  }, []);
+  const closeRelations = useCallback(() => setRelationsKey(null), []);
+  const providerMod = useMemo(
+    () => mods.find((item) => item.key === providerKey) ?? null,
+    [mods, providerKey]
+  );
+  const handleSelectMod = useCallback(
+    (mod) => {
+      if (!mod) return;
+      const fresh = mods.find((item) => item.filename === mod.filename) ?? mod;
+      setSelected(fresh);
+      setRelationsKey((current) => (current ? fresh.key : current));
+    },
+    [mods]
+  );
+  const handleTableSelect = useCallback((mod) => {
+    setSelected(mod);
+    setRelationsKey((current) => (current ? mod.key : current));
+  }, []);
+
   const canShowWorkspace = Boolean(settings?.instanceRoot);
   const progressPercent =
     progress?.total > 0 ? Math.min(100, Math.round((progress.index / progress.total) * 100)) : 0;
-  const uiLocked = busy || bootstrapping;
+  const uiLocked = busy;
 
   const progressLabel =
     bootstrapping && progress
-      ? `${progress.kind === 'covers' ? 'Обложки' : 'Зависимости'} · ${progress.index}/${progress.total}${
+      ? `${progress.kind === 'covers' ? 'Обложки' : progress.kind === 'dependencies' ? 'Зависимости' : 'Моды'} · ${progress.index}/${progress.total}${
           progress.name ? ` · ${progress.name}` : ''
         }`
       : '';
@@ -333,7 +424,7 @@ function App() {
               className={filter === item.id ? 'active' : ''}
               onClick={() => setFilter(item.id)}
               type="button"
-              disabled={uiLocked}
+              disabled={busy}
               data-tauri-drag-region="false"
             >
               {item.icon ? <Icon className={`tagIcon ${item.tone}`} size={13} /> : null}
@@ -347,7 +438,7 @@ function App() {
           icon={Settings}
           label="Настройки"
           onClick={() => setSettingsOpen(true)}
-          disabled={uiLocked}
+          disabled={busy || bootstrapping}
         />
       </div>
     </div>
@@ -358,7 +449,7 @@ function App() {
         icon={Settings}
         label="Настройки"
         onClick={() => setSettingsOpen(true)}
-        disabled={uiLocked}
+        disabled={busy || bootstrapping}
       />
     </div>
   );
@@ -381,16 +472,26 @@ function App() {
           <NoticeModal tone="ok" message={info && !error && !bootstrapping ? info : ''} onClose={() => setInfo('')} />
 
           <section className="workspace">
-            <ModTable mods={visible} selected={selected} onSelect={setSelected} />
+            <ModTable
+              mods={visible}
+              selected={selected}
+              onSelect={handleTableSelect}
+              onCoverClick={openRelationsForMod}
+              onSourceClick={(mod) => setProviderKey(mod.key)}
+            />
             <aside>
               {selected ? (
                 <ModEditor
                   mod={selected}
                   mods={mods}
-                  busy={uiLocked}
+                  busy={busy}
                   onPatch={patchMod}
                   onUploadCover={handleUploadCover}
-                  onSelectMod={(mod) => setSelected(mods.find((item) => item.filename === mod.filename) ?? mod)}
+                  onDeleteCover={handleDeleteCover}
+                  relationsOpenKey={relationsKey}
+                  onOpenRelations={openRelationsForMod}
+                  onCloseRelations={closeRelations}
+                  onSelectMod={handleSelectMod}
                 />
               ) : (
                 <div className="empty">Выбери мод в списке</div>
@@ -402,7 +503,7 @@ function App() {
         <section className="setupState">
           <h2>Выбери сборку</h2>
           <p>Укажи папку инстанса PrismLauncher — обложки и зависимости подтянутся один раз в фоне.</p>
-          <button type="button" onClick={() => setSettingsOpen(true)}>
+          <button type="button" onClick={() => setSettingsOpen(true)} disabled={busy || bootstrapping}>
             Открыть настройки
           </button>
         </section>
@@ -424,14 +525,23 @@ function App() {
           busy={uiLocked}
           onClose={() => setSettingsOpen(false)}
           onSave={handleSaveSettings}
-          onRefresh={handleRefreshSettings}
           onCleared={async () => {
             const next = await getSettings();
             setSettings(next);
-            if (next.instanceRoot) await reload();
+            if (next.instanceRoot) {
+              await reload();
+              void runBootstrap(next.cacheStatus, { force: true });
+            }
           }}
         />
       ) : null}
+
+      <ProviderDialog
+        mod={providerMod}
+        busy={busy}
+        onClose={() => !busy && setProviderKey(null)}
+        onSelect={handleSwitchSource}
+      />
     </main>
   );
 }

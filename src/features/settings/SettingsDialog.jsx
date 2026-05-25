@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Folder, FolderOpen, Info, RefreshCw, Trash2 } from 'lucide-react';
+import { Folder, FolderOpen, Info, RefreshCw } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Button } from '../../components/Button.jsx';
 import { Modal } from '../../components/Modal.jsx';
+import { NoticeModal } from '../../components/NoticeModal.jsx';
 import { clearAppData } from '../../api.js';
 
 function toSettings(draft) {
@@ -39,10 +40,10 @@ function formatStatus(status) {
   return missing.length ? `нужно: ${missing.join(' и ')}` : 'готово к проверке';
 }
 
-export function SettingsDialog({ settings, busy, onClose, onSave, onRefresh, onCleared }) {
+export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
   const [draft, setDraft] = useState(() => settings ?? {});
   const [message, setMessage] = useState('');
-  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState(null);
   const [clearing, setClearing] = useState(false);
 
   const hasPack = Boolean(draft.instanceRoot);
@@ -78,15 +79,6 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onRefresh, onC
     onClose?.();
   }
 
-  async function refreshNow() {
-    if (!hasPack) {
-      setMessage('Выбери папку сборки.');
-      return;
-    }
-    setMessage('');
-    await onRefresh(toSettings(draft));
-  }
-
   async function openCurseForgeHelp() {
     await openUrl('https://console.curseforge.com/?#/api-keys');
   }
@@ -95,15 +87,12 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onRefresh, onC
     setClearing(true);
     setMessage('');
     try {
-      const result = await clearAppData();
-      const parts = [];
-      if (result?.removedCatalogFiles) parts.push(`файлов: ${result.removedCatalogFiles}`);
-      if (result?.clearedInstances) parts.push(`сборок: ${result.clearedInstances}`);
-      setMessage(parts.length ? `Очищено — ${parts.join(', ')}.` : 'Очищено.');
-      setConfirmingClear(false);
+      await clearAppData();
+      setClearConfirm(null);
       await onCleared?.();
+      onClose?.();
     } catch (err) {
-      setMessage(`Не удалось очистить: ${err}`);
+      setMessage(`Не удалось обновить данные: ${err}`);
     } finally {
       setClearing(false);
     }
@@ -118,15 +107,13 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onRefresh, onC
       footer={(
         <div className="settingsFooter">
           <Button
-            icon={Trash2}
-            onClick={() => setConfirmingClear(true)}
+            icon={RefreshCw}
+            onClick={() => setClearConfirm('Заново загрузить обложки и\u00a0зависимости?')}
             disabled={uiBusy}
-            tone="danger-ghost"
+            tone="ghost"
+            className="settingsFooterBtn"
           >
-            Очистить данные
-          </Button>
-          <Button icon={RefreshCw} onClick={refreshNow} disabled={uiBusy || !hasPack}>
-            Обновить
+            Обновить данные
           </Button>
         </div>
       )}
@@ -196,22 +183,23 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onRefresh, onC
           </div>
         ) : null}
 
-        {confirmingClear ? (
-          <div className="dangerConfirm">
-            <p>Удалить все скачанные обложки и зависимости?</p>
-            <div className="dangerActions">
-              <Button onClick={() => setConfirmingClear(false)} disabled={clearing} tone="ghost">
-                Отмена
-              </Button>
-              <Button onClick={confirmClear} disabled={clearing} tone="danger">
-                {clearing ? 'Чистим…' : 'Да, очистить'}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
         {message ? <p className="settingsMessage">{message}</p> : null}
       </div>
+
+      {clearConfirm ? (
+        <NoticeModal
+          tone="bad"
+          message={clearConfirm}
+          onClose={() => !clearing && setClearConfirm(null)}
+          confirm={{
+            confirmLabel: clearing ? 'Обновляем…' : 'Обновить',
+            cancelLabel: 'Отмена',
+            busy: clearing,
+            onConfirm: confirmClear,
+            onCancel: () => setClearConfirm(null)
+          }}
+        />
+      ) : null}
     </Modal>
   );
 }

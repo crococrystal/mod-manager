@@ -40,7 +40,7 @@ struct JarCacheFile {
 }
 
 fn jar_cache_version() -> u8 {
-    2
+    3
 }
 
 fn read_jar_toml(jar_path: &Path) -> Option<String> {
@@ -86,7 +86,7 @@ fn parse_own_mod_id(text: &str) -> Option<String> {
 
 fn parse_dependency_mod_ids(text: &str) -> Vec<String> {
     let mut ids = Vec::new();
-    for block in text.split("[[dependencies.") {
+    for block in text.split("[[dependencies.").skip(1) {
         let mut mod_id = None;
         let mut dep_type = "required".to_string();
         for line in block.lines() {
@@ -185,7 +185,7 @@ fn load_cache(path: &Path) -> JarCacheFile {
     let Ok(raw) = serde_json::from_str::<JarCacheFile>(&text) else {
         return JarCacheFile::default();
     };
-    if raw.version != 2 {
+    if raw.version != jar_cache_version() {
         return JarCacheFile::default();
     }
     raw
@@ -206,8 +206,8 @@ pub fn jar_deps_for_mods(
 ) -> Result<HashMap<String, Vec<String>>, String> {
     let mut cache = load_cache(cache_path);
     let mut dirty = false;
-    let registry = build_registry(refs);
     let mut result = HashMap::new();
+    let mut mod_ids_by_key = HashMap::new();
 
     for item in refs {
         let jar_path = mods_dir.join(&item.filename);
@@ -227,7 +227,28 @@ pub fn jar_deps_for_mods(
                 dirty = true;
             }
         }
+        if let Some(mod_id) = entry.mod_id.as_deref() {
+            mod_ids_by_key.insert(item.key.clone(), mod_id.to_string());
+        }
+    }
 
+    let mut registry = build_registry(refs);
+    for item in refs {
+        let Some(mod_id) = mod_ids_by_key.get(&item.key) else {
+            continue;
+        };
+        let lower = mod_id.trim().to_ascii_lowercase();
+        if !lower.is_empty() {
+            registry.insert(lower.clone(), item.key.clone());
+        }
+        let norm = normalize_token(&lower);
+        if !norm.is_empty() {
+            registry.insert(norm, item.key.clone());
+        }
+    }
+
+    for item in refs {
+        let entry = cache.entries.entry(item.filename.clone()).or_default();
         let keys: Vec<String> = entry
             .dependency_mod_ids
             .iter()
@@ -238,7 +259,7 @@ pub fn jar_deps_for_mods(
     }
 
     if dirty {
-        cache.version = 2;
+        cache.version = jar_cache_version();
         save_cache(cache_path, &cache)?;
     }
     Ok(result)

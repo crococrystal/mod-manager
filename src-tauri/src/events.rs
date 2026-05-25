@@ -70,14 +70,39 @@ pub(crate) fn emit_prefetch_done(app: &AppHandle, kind: &str) {
 struct CoverReadyPayload {
     key: String,
     cover_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cover_modified_at: Option<u64>,
 }
 
-pub(crate) fn emit_cover_ready(app: &AppHandle, key: &str, cover_path: &str) {
+pub(crate) fn emit_cover_ready(
+    app: &AppHandle,
+    key: &str,
+    cover_path: &str,
+    cover_modified_at: Option<u64>,
+) {
     let _ = app.emit(
         "cover-ready",
         CoverReadyPayload {
             key: key.to_string(),
             cover_path: cover_path.to_string(),
+            cover_modified_at,
+        },
+    );
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DependenciesReadyPayload {
+    key: String,
+    dependencies: Vec<String>,
+}
+
+pub(crate) fn emit_dependencies_ready(app: &AppHandle, key: &str, dependencies: &[String]) {
+    let _ = app.emit(
+        "dependencies-ready",
+        DependenciesReadyPayload {
+            key: key.to_string(),
+            dependencies: dependencies.to_vec(),
         },
     );
 }

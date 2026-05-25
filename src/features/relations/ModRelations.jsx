@@ -30,10 +30,26 @@ export function ModRelations({
   mods,
   busy,
   onChange,
-  onSelectMod
+  onSelectMod,
+  onOpenRelations,
+  onCloseRelations,
+  relationsOpenKey
 }) {
-  const [modal, setModal] = useState(null);
+  const relationsOpen = relationsOpenKey === currentMod.key;
+  const [addOpen, setAddOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const modal = addOpen ? 'add' : relationsOpen ? 'relations' : null;
+  const setModal = (next) => {
+    if (next === 'add') {
+      setAddOpen(true);
+    } else if (next === 'relations') {
+      setAddOpen(false);
+      onOpenRelations?.(currentMod);
+    } else {
+      setAddOpen(false);
+      onCloseRelations?.();
+    }
+  };
   const jarKeys = useMemo(() => new Set(jarDependencies), [jarDependencies]);
 
   const usedItems = useMemo(
@@ -63,18 +79,21 @@ export function ModRelations({
   const activeView = resolveActiveView(relationsView, lastViewRef.current, hasDeps, hasUsed);
 
   function closeModal() {
-    setModal(null);
+    setAddOpen(false);
+    onCloseRelations?.();
     setQuery('');
   }
 
   function openRelations() {
-    setModal('relations');
+    setAddOpen(false);
+    onOpenRelations?.(currentMod);
   }
 
   function addDependency(key) {
     if (!key || resolvedDependencies.includes(key)) return;
     onChange([...manualDependencies, key]);
-    closeModal();
+    setAddOpen(false);
+    setQuery('');
   }
 
   function removeDependency(key) {
@@ -99,7 +118,8 @@ export function ModRelations({
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
   useEffect(() => {
-    if (modal) setQuery('');
+    setAddOpen(false);
+    setQuery('');
   }, [currentMod.key]);
 
   useEffect(() => {

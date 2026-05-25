@@ -24,6 +24,14 @@ export function updateModTags(patch) {
   return invoke('update_mod_tags', { patch });
 }
 
+export function switchModSource({ key, source }) {
+  return invoke('switch_mod_source', { request: { key, source } });
+}
+
 export function uploadCover({ key, dataUrl }) {
   return invoke('upload_cover', { key, dataUrl });
+}
+
+export function deleteCustomCover(key) {
+  return invoke('delete_custom_cover', { key });
 }

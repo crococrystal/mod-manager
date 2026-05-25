@@ -266,14 +266,15 @@ fn clear_instance_downloads(data_root: &Path) -> Result<bool, String> {
         return Ok(false);
     }
     let mut touched = false;
-    for sub in ["cache", "covers"] {
+    for sub in ["cache", "covers/cache"] {
         let path = data_root.join(sub);
         if path.exists() {
             fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
             touched = true;
         }
     }
-    let _ = fs::create_dir_all(data_root.join("covers"));
+    let _ = fs::create_dir_all(data_root.join("covers/cache"));
+    let _ = fs::create_dir_all(data_root.join("covers/manual"));
     let _ = fs::create_dir_all(data_root.join("cache"));
     Ok(touched)
 }

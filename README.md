@@ -2,6 +2,12 @@
 
 Native Tauri app for keeping Minecraft modpack metadata outside jar filenames.
 
+## Download
+
+Installers for Windows and macOS are published on every push to `main`:
+
+https://github.com/crococrystal/mod-manager/releases/tag/latest
+
 ## Current MVP
 
 - Pick a PrismLauncher instance or `minecraft/mods` folder.

@@ -3,7 +3,7 @@ import { formatDate } from '../../lib/modMeta.jsx';
 import { ModCover } from './ModCover.jsx';
 import { SourceIcon, TagMark } from './ModBadges.jsx';
 
-export function ModTable({ mods, selected, onSelect }) {
+export function ModTable({ mods, selected, onSelect, onCoverClick, onSourceClick }) {
   const wrapRef = useRef(null);
 
   useEffect(() => {
@@ -35,7 +35,11 @@ export function ModTable({ mods, selected, onSelect }) {
             >
               <td><TagMark mod={mod} /></td>
               <td className="coverCell" onClick={(event) => event.stopPropagation()}>
-                <ModCover mod={mod} />
+                <ModCover
+                  mod={mod}
+                  onClick={onCoverClick ? () => onCoverClick(mod) : undefined}
+                  title={onCoverClick ? 'Связи мода' : undefined}
+                />
               </td>
               <td>
                 <strong>{mod.displayName}</strong>
@@ -44,7 +48,9 @@ export function ModTable({ mods, selected, onSelect }) {
                 {mod.description || '—'}
               </td>
               <td>{formatDate(mod.modifiedAt)}</td>
-              <td><SourceIcon mod={mod} linked /></td>
+              <td onClick={(event) => event.stopPropagation()}>
+                <SourceIcon mod={mod} onClick={onSourceClick ? () => onSourceClick(mod) : undefined} />
+              </td>
             </tr>
           ))}
         </tbody>

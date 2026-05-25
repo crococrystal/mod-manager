@@ -36,6 +36,12 @@ pub(crate) struct ModTags {
     #[serde(default)]
     pub source: String,
     #[serde(default)]
+    pub modrinth_id: String,
+    #[serde(default)]
+    pub curseforge_id: String,
+    #[serde(default)]
+    pub curseforge_slug: String,
+    #[serde(default)]
     pub updated_at: String,
 }
 

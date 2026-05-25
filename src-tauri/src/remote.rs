@@ -3,6 +3,12 @@ use std::collections::HashMap;
 use crate::mods::ModEntry;
 use crate::settings::Settings;
 
+#[derive(Clone, Debug)]
+pub(crate) struct ProviderProject {
+    pub id: String,
+    pub slug: Option<String>,
+}
+
 pub(crate) fn http_client() -> Option<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(8))
@@ -58,6 +64,14 @@ pub(crate) fn curseforge_get(
         .ok()
 }
 
+fn non_empty_json_string(value: Option<&serde_json::Value>) -> Option<String> {
+    value
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 pub(crate) fn modrinth_search_icon(
     client: &reqwest::blocking::Client,
     display_name: &str,
@@ -80,9 +94,70 @@ pub(crate) fn modrinth_search_icon(
         .get("hits")
         .and_then(|hits| hits.as_array())
         .and_then(|hits| hits.first())
-        .and_then(|hit| hit.get("icon_url"))
-        .and_then(|value| value.as_str())
-        .map(str::to_string)
+        .and_then(|hit| non_empty_json_string(hit.get("icon_url")))
+}
+
+pub(crate) fn modrinth_search_project(
+    client: &reqwest::blocking::Client,
+    display_name: &str,
+) -> Option<ProviderProject> {
+    let query = urlencoding::encode(display_name.trim());
+    if query.is_empty() {
+        return None;
+    }
+    let payload = client
+        .get(format!(
+            "https://api.modrinth.com/v2/search?query={query}&limit=1&index=relevance"
+        ))
+        .send()
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<serde_json::Value>()
+        .ok()?;
+    let hit = payload
+        .get("hits")
+        .and_then(|hits| hits.as_array())
+        .and_then(|hits| hits.first())?;
+    let id = hit
+        .get("project_id")
+        .or_else(|| hit.get("slug"))
+        .and_then(|value| value.as_str())?;
+    Some(ProviderProject {
+        id: id.to_string(),
+        slug: hit
+            .get("slug")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+    })
+}
+
+pub(crate) fn curseforge_search_mod(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    display_name: &str,
+) -> Option<ProviderProject> {
+    let query = urlencoding::encode(display_name.trim());
+    if query.is_empty() || api_key.trim().is_empty() {
+        return None;
+    }
+    let payload = curseforge_get(
+        client,
+        api_key,
+        &format!("mods/search?gameId=432&classId=6&searchFilter={query}&pageSize=1"),
+    )?;
+    let item = payload
+        .get("data")
+        .and_then(|data| data.as_array())
+        .and_then(|items| items.first())?;
+    let id = item.get("id").and_then(|value| value.as_i64())?;
+    Some(ProviderProject {
+        id: id.to_string(),
+        slug: item
+            .get("slug")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+    })
 }
 
 pub(crate) fn fetch_api_dependencies(
@@ -94,7 +169,9 @@ pub(crate) fn fetch_api_dependencies(
 ) -> Vec<String> {
     let mut auto_dependencies = Vec::new();
 
-    if item.modrinth_id.is_some() && settings.auto_prefetch_dependencies {
+    let prefer_curseforge = item.source == "curseforge";
+
+    if !prefer_curseforge && item.modrinth_id.is_some() && settings.auto_prefetch_dependencies {
         if let Some(version_id) = item.modrinth_version_id.as_deref() {
             if let Some(payload) = modrinth_version(client, version_id) {
                 if let Some(deps) = payload.get("dependencies").and_then(|value| value.as_array()) {
@@ -153,6 +230,33 @@ pub(crate) fn fetch_api_dependencies(
         }
     }
 
+    if prefer_curseforge {
+        if item.modrinth_id.is_some() && settings.auto_prefetch_dependencies {
+            if let Some(version_id) = item.modrinth_version_id.as_deref() {
+                if let Some(payload) = modrinth_version(client, version_id) {
+                    if let Some(deps) = payload.get("dependencies").and_then(|value| value.as_array()) {
+                        for dep in deps {
+                            let required = dep
+                                .get("dependency_type")
+                                .and_then(|value| value.as_str())
+                                .is_some_and(|kind| kind == "required");
+                            let Some(project_id) =
+                                dep.get("project_id").and_then(|value| value.as_str())
+                            else {
+                                continue;
+                            };
+                            if required {
+                                if let Some(key) = modrinth_lookup.get(project_id) {
+                                    auto_dependencies.push(key.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     auto_dependencies
 }
 
@@ -161,27 +265,29 @@ pub(crate) fn resolve_cover_url(
     client: &reqwest::blocking::Client,
     api_key: &str,
 ) -> Option<String> {
-    if let Some(project_id) = item.modrinth_id.as_deref() {
-        if let Some(url) = modrinth_project(client, project_id).and_then(|payload| {
-            payload
-                .get("icon_url")
-                .and_then(|value| value.as_str())
-                .map(str::to_string)
-        }) {
-            return Some(url);
+    let prefer_curseforge = item.source == "curseforge";
+
+    if !prefer_curseforge {
+        if let Some(project_id) = item.modrinth_id.as_deref() {
+            if let Some(url) = modrinth_project(client, project_id).and_then(|payload| {
+                payload
+                    .get("icon_url")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            }) {
+                return Some(url);
+            }
         }
     }
     if let Some(project_id) = item.curseforge_id.as_deref() {
-        if let Some(url) =
-            curseforge_get(client, api_key, &format!("mods/{project_id}")).and_then(|payload| {
+        if let Some(url) = curseforge_get(client, api_key, &format!("mods/{project_id}"))
+            .and_then(|payload| {
                 payload
                     .get("data")
                     .and_then(|data| data.get("logo"))
                     .and_then(|logo| {
-                        logo.get("thumbnailUrl")
-                            .or_else(|| logo.get("url"))
-                            .and_then(|value| value.as_str())
-                            .map(str::to_string)
+                        non_empty_json_string(logo.get("thumbnailUrl"))
+                            .or_else(|| non_empty_json_string(logo.get("url")))
                     })
             })
         {
@@ -189,6 +295,18 @@ pub(crate) fn resolve_cover_url(
         }
         if let Some(url) = modrinth_search_icon(client, &item.display_name) {
             return Some(url);
+        }
+    }
+    if prefer_curseforge {
+        if let Some(project_id) = item.modrinth_id.as_deref() {
+            if let Some(url) = modrinth_project(client, project_id).and_then(|payload| {
+                payload
+                    .get("icon_url")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            }) {
+                return Some(url);
+            }
         }
     }
     None

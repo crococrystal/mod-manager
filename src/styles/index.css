@@ -443,6 +443,11 @@ h1 {
   pointer-events: none;
 }
 
+.noticeToastLayerInteractive {
+  pointer-events: auto;
+  background: rgb(0 0 0 / 0.42);
+}
+
 .noticeToast {
   display: flex;
   flex-direction: column;
@@ -470,6 +475,25 @@ h1 {
   font-size: 14px;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.noticeToastConfirm {
+  width: min(320px, calc(100vw - 32px));
+  pointer-events: auto;
+}
+
+.noticeToastActions {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.noticeToastBtn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 36px;
 }
 
 @keyframes noticeToastIn {
@@ -775,6 +799,13 @@ td small {
   text-decoration: none;
 }
 
+.sourceIconButton {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
 .sourceIcon img {
   display: block;
   width: 22px;
@@ -790,6 +821,54 @@ td small {
   border-radius: 999px;
   background: #473321;
   color: #f3c07c;
+}
+
+.providerModalStack {
+  width: min(420px, calc(100vw - 32px));
+}
+
+.providerModal {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.providerOption {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 10px 14px;
+  border: 1px solid #35444b;
+  border-radius: 8px;
+  background: #12171a;
+  color: #eef2f3;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.providerOption img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.providerOption strong {
+  color: #8de3bc;
+  font-size: 13px;
+}
+
+.providerOption:hover:not(:disabled),
+.providerOption.active {
+  border-color: #2dbd63;
+  background: #14211b;
+}
+
+.providerOption:disabled {
+  cursor: default;
+  opacity: 0.75;
 }
 
 aside {
@@ -824,6 +903,40 @@ aside {
   line-height: 1.35;
   text-align: center;
   word-break: break-word;
+}
+
+.editorCoverFrame {
+  position: relative;
+}
+
+.coverResetIcon {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: rgba(15, 18, 22, 0.72);
+  color: #d4d8dc;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.coverResetIcon:hover:not(:disabled) {
+  background: rgba(15, 18, 22, 0.92);
+  color: #ffffff;
+}
+
+.coverResetIcon:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .modPageLink {
@@ -1517,9 +1630,13 @@ dd {
 }
 
 .settingsFooter {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 8px;
-  justify-content: flex-end;
+  width: 100%;
+}
+
+.settingsFooter .settingsFooterBtn {
   width: 100%;
 }
 
@@ -1574,37 +1691,6 @@ dd {
   background: #161c1f;
 }
 
-.dangerZone {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 4px;
-  padding-top: 12px;
-  border-top: 1px solid #2a3236;
-}
-
-.dangerConfirm {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid #4a2a2a;
-  border-radius: 8px;
-  background: #1f1314;
-}
-
-.dangerConfirm p {
-  margin: 0;
-  color: #d8c9c9;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.dangerActions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
 .button-ghost {
   background: transparent;
   color: #b6bec3;
@@ -1613,25 +1699,6 @@ dd {
 
 .button-ghost:hover:not(:disabled) {
   background: #20262a;
-}
-
-.button-danger {
-  background: #6b2a2a;
-  color: #f5e0e0;
-}
-
-.button-danger:hover:not(:disabled) {
-  background: #823434;
-}
-
-.button-danger-ghost {
-  background: transparent;
-  color: #e58c8c;
-  border: 1px solid #4a2a2a;
-}
-
-.button-danger-ghost:hover:not(:disabled) {
-  background: #2a1818;
 }
 
 .button:disabled {

@@ -41,6 +41,7 @@ pub(crate) struct ModEntry {
     pub cover_url: Option<String>,
     pub cover_path: Option<String>,
     pub cover_manual: bool,
+    pub cover_modified_at: Option<u64>,
     pub source: String,
     pub source_url: Option<String>,
     pub has_index: bool,
@@ -174,17 +175,20 @@ pub(crate) fn normalize_side(side: &str) -> String {
     }
 }
 
-fn source_url(source: &str, info: Option<&IndexInfo>) -> Option<String> {
+fn clean_tag_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn source_url(source: &str, modrinth_id: Option<&str>, curseforge_slug: Option<&str>) -> Option<String> {
     match source {
-        "modrinth" => info
-            .and_then(|info| info.modrinth_id.as_ref())
-            .map(|id| format!("https://modrinth.com/mod/{id}")),
-        "curseforge" => info.map(|info| {
-            format!(
-                "https://www.curseforge.com/minecraft/mc-mods/{}",
-                info.slug
-            )
-        }),
+        "modrinth" => modrinth_id.map(|id| format!("https://modrinth.com/mod/{id}")),
+        "curseforge" => curseforge_slug
+            .map(|slug| format!("https://www.curseforge.com/minecraft/mc-mods/{slug}")),
         _ => None,
     }
 }
@@ -272,7 +276,7 @@ pub(crate) fn scan_mods_for_settings(
         let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
         let info = index.get(&filename);
         let key = stable_key(&filename, info);
-        let source = if info.and_then(|info| info.modrinth_id.as_ref()).is_some() {
+        let default_source = if info.and_then(|info| info.modrinth_id.as_ref()).is_some() {
             "modrinth"
         } else if info.and_then(|info| info.curseforge_id.as_ref()).is_some() {
             "curseforge"
@@ -291,7 +295,7 @@ pub(crate) fn scan_mods_for_settings(
                         .map(normalize_side)
                         .unwrap_or_else(|| "universal".to_string()),
                     aliases: vec![filename.clone()],
-                    source: source.to_string(),
+                    source: default_source.to_string(),
                     updated_at: now_iso(),
                     ..ModTags::default()
                 },
@@ -300,6 +304,23 @@ pub(crate) fn scan_mods_for_settings(
         }
 
         let tag = tags.mods.get(&key).cloned().unwrap_or_default();
+        let tag_modrinth_id = clean_tag_value(&tag.modrinth_id);
+        let tag_curseforge_id = clean_tag_value(&tag.curseforge_id);
+        let tag_curseforge_slug = clean_tag_value(&tag.curseforge_slug);
+        let modrinth_id = tag_modrinth_id
+            .clone()
+            .or_else(|| info.and_then(|info| info.modrinth_id.clone()));
+        let curseforge_id = tag_curseforge_id
+            .clone()
+            .or_else(|| info.and_then(|info| info.curseforge_id.clone()));
+        let curseforge_slug = tag_curseforge_slug
+            .clone()
+            .or_else(|| info.map(|info| info.slug.clone()));
+        let source = match tag.source.as_str() {
+            "modrinth" if modrinth_id.is_some() => "modrinth",
+            "curseforge" if curseforge_id.is_some() => "curseforge",
+            _ => default_source,
+        };
         let side = normalize_side(if tag.side.is_empty() {
             "universal"
         } else {
@@ -326,15 +347,16 @@ pub(crate) fn scan_mods_for_settings(
             cover_url: None,
             cover_path: None,
             cover_manual: false,
+            cover_modified_at: None,
             source: source.to_string(),
-            source_url: source_url(source, info),
+            source_url: source_url(source, modrinth_id.as_deref(), curseforge_slug.as_deref()),
             has_index: info.is_some(),
             has_tags: true,
             index_file: info.map(|info| info.index_file.clone()),
             pack_side: info.and_then(|info| info.side.clone()),
-            modrinth_id: info.and_then(|info| info.modrinth_id.clone()),
+            modrinth_id,
             modrinth_version_id: info.and_then(|info| info.modrinth_version_id.clone()),
-            curseforge_id: info.and_then(|info| info.curseforge_id.clone()),
+            curseforge_id,
             curseforge_file_id: info.and_then(|info| info.curseforge_file_id.clone()),
             duplicate: base_counts.get(&filename).copied().unwrap_or_default() > 1,
             modified_at: metadata
