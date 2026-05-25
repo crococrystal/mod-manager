@@ -1,3 +1,5 @@
+use std::{path::PathBuf, process::Command};
+
 use base64::{engine::general_purpose, Engine};
 use serde::Deserialize;
 use tauri::AppHandle;
@@ -37,6 +39,60 @@ pub(crate) struct UpdateModTagsRequest {
 pub(crate) struct SwitchModSourceRequest {
     pub key: String,
     pub source: String,
+}
+
+#[cfg(target_os = "macos")]
+fn copy_files_to_clipboard(paths: &[PathBuf]) -> Result<(), String> {
+    let script = r#"
+on run argv
+  set fileList to {}
+  repeat with filePath in argv
+    set end of fileList to POSIX file filePath
+  end repeat
+  set the clipboard to fileList
+end run
+"#;
+    let status = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .args(paths)
+        .status()
+        .map_err(|error| error.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Не удалось скопировать файлы в буфер обмена.".to_string())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn copy_files_to_clipboard(paths: &[PathBuf]) -> Result<(), String> {
+    let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$files = New-Object System.Collections.Specialized.StringCollection
+foreach ($path in $args) {
+  [void]$files.Add((Resolve-Path -LiteralPath $path).Path)
+}
+[System.Windows.Forms.Clipboard]::SetFileDropList($files)
+"#;
+    let status = Command::new("powershell.exe")
+        .arg("-NoProfile")
+        .arg("-STA")
+        .arg("-Command")
+        .arg(script)
+        .args(paths)
+        .status()
+        .map_err(|error| error.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Не удалось скопировать файлы в буфер обмена.".to_string())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn copy_files_to_clipboard(_paths: &[PathBuf]) -> Result<(), String> {
+    Err("Копирование файлов поддержано только на macOS и Windows.".to_string())
 }
 
 #[tauri::command]
@@ -304,6 +360,41 @@ pub(crate) async fn switch_mod_source(
     })
     .await
     .map_err(|error| format!("Переключение поставщика прервано: {error}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn copy_mod_files(app: AppHandle, keys: Vec<String>) -> Result<u32, String> {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<u32, String> {
+        if keys.is_empty() {
+            return Err("Нечего копировать.".to_string());
+        }
+
+        let settings = read_settings(&app_handle)?;
+        let paths = resolve_paths(&settings)?;
+        let catalog_root = catalog::catalog_root(&app_handle).ok();
+        let mods = scan_mods_for_settings(&settings, catalog_root)?;
+        let mut file_paths = Vec::new();
+
+        for key in keys {
+            let Some(item) = mods.iter().find(|mod_entry| mod_entry.key == key) else {
+                continue;
+            };
+            let path = paths.mods_dir.join(&item.filename);
+            if path.is_file() {
+                file_paths.push(path);
+            }
+        }
+
+        if file_paths.is_empty() {
+            return Err("Не найдено файлов для копирования.".to_string());
+        }
+
+        copy_files_to_clipboard(&file_paths)?;
+        Ok(file_paths.len() as u32)
+    })
+    .await
+    .map_err(|error| format!("Копирование прервано: {error}"))?
 }
 
 #[tauri::command]

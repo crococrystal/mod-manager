@@ -28,6 +28,10 @@ export function switchModSource({ key, source }) {
   return invoke('switch_mod_source', { request: { key, source } });
 }
 
+export function copyModFiles(keys) {
+  return invoke('copy_mod_files', { keys });
+}
+
 export function uploadCover({ key, dataUrl }) {
   return invoke('upload_cover', { key, dataUrl });
 }

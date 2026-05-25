@@ -36,6 +36,7 @@ pub fn run() {
             commands::clear_app_data,
             commands::update_mod_tags,
             commands::switch_mod_source,
+            commands::copy_mod_files,
             commands::upload_cover,
             commands::delete_custom_cover
         ])

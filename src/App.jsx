@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Search, Settings, SlidersHorizontal } from 'lucide-react';
 import {
   bootstrapInstance,
+  copyModFiles,
   deleteCustomCover,
   getSettings,
   saveSettings,
@@ -57,6 +58,7 @@ function App() {
   const [payload, setPayload] = useState(null);
   const [settings, setSettings] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [selectedKeys, setSelectedKeys] = useState(() => new Set());
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [busy, setBusy] = useState(false);
@@ -180,12 +182,26 @@ function App() {
   useEffect(() => {
     if (!visible.length) {
       setSelected(null);
+      setSelectedKeys(new Set());
       return;
     }
     if (!selected || !visible.some((mod) => mod.filename === selected.filename)) {
       setSelected(visible[0]);
+      setSelectedKeys(new Set([visible[0].key]));
     }
   }, [visible, selected]);
+
+  useEffect(() => {
+    const visibleKeys = new Set(visible.map((mod) => mod.key));
+    setSelectedKeys((current) => {
+      const next = new Set([...current].filter((key) => visibleKeys.has(key)));
+      if (!next.size && selected?.key && visibleKeys.has(selected.key)) {
+        next.add(selected.key);
+      }
+      const same = next.size === current.size && [...next].every((key) => current.has(key));
+      return same ? current : next;
+    });
+  }, [selected?.key, visible]);
 
   const moveSelection = useCallback(
     (delta) => {
@@ -199,25 +215,58 @@ function App() {
           : (index + delta + visible.length) % visible.length;
       const next = visible[nextIndex];
       setSelected(next);
+      setSelectedKeys(new Set([next.key]));
       setRelationsKey((current) => (current ? next.key : current));
     },
     [visible, selected]
   );
 
+  const copySelectedFiles = useCallback(async () => {
+    const keys = [...selectedKeys];
+    if (!keys.length) return;
+    setError('');
+    try {
+      const count = await copyModFiles(keys);
+      setInfo(`Скопировано файлов: ${count}.`);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, [selectedKeys]);
+
   useEffect(() => {
     function handleKeyDown(event) {
-      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) {
         return;
       }
+
+      const command = event.metaKey || event.ctrlKey;
+      if (command && event.key.toLowerCase() === 'a' && canShowWorkspace) {
+        event.preventDefault();
+        const keys = visible.map((mod) => mod.key);
+        setSelectedKeys(new Set(keys));
+        if (visible.length && !selected) {
+          setSelected(visible[0]);
+        }
+        return;
+      }
+
+      if (command && event.key.toLowerCase() === 'c' && canShowWorkspace) {
+        if (selectedKeys.size) {
+          event.preventDefault();
+          void copySelectedFiles();
+        }
+        return;
+      }
+
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
       event.preventDefault();
       moveSelection(event.key === 'ArrowUp' ? -1 : 1);
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [moveSelection]);
+  }, [canShowWorkspace, copySelectedFiles, moveSelection, selected, selectedKeys, visible]);
 
   useEffect(() => {
     let unlistenMods;
@@ -394,6 +443,7 @@ function App() {
   );
   const handleTableSelect = useCallback((mod) => {
     setSelected(mod);
+    setSelectedKeys(new Set([mod.key]));
     setRelationsKey((current) => (current ? mod.key : current));
   }, []);
 
@@ -480,6 +530,7 @@ function App() {
             <ModTable
               mods={visible}
               selected={selected}
+              selectedKeys={selectedKeys}
               onSelect={handleTableSelect}
               onCoverClick={openRelationsForMod}
               onSourceClick={(mod) => setProviderKey(mod.key)}
