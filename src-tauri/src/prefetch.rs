@@ -155,13 +155,17 @@ pub(crate) fn prefetch_mod_assets_for_settings(
         }
 
         let step = index as u32 + 1;
-        emit_prefetch_progress(app, "mods", step, total, &item.display_name, "fetch", "");
+        let mut did_work = false;
+        let mut progress_started = false;
 
         if run_covers {
             apply_existing_cover(item, &paths, catalog_root.as_deref());
             if item.cover_path.is_some() {
                 report.skipped += 1;
             } else if item.modrinth_id.is_some() || item.curseforge_id.is_some() {
+                did_work = true;
+                progress_started = true;
+                emit_prefetch_progress(app, "mods", step, total, &item.display_name, "fetch", "");
                 if let Some(path) = fetch_mod_cover(
                     &client,
                     &paths,
@@ -194,6 +198,10 @@ pub(crate) fn prefetch_mod_assets_for_settings(
             } else if can_cf && !has_cf_key && !can_mr {
                 report.skipped += 1;
             } else {
+                did_work = true;
+                if !progress_started {
+                    emit_prefetch_progress(app, "mods", step, total, &item.display_name, "fetch", "");
+                }
                 let keys = fetch_api_dependencies(
                     item,
                     &client,
@@ -223,7 +231,9 @@ pub(crate) fn prefetch_mod_assets_for_settings(
             }
         }
 
-        emit_prefetch_progress(app, "mods", step, total, &item.display_name, "ok", "");
+        if did_work {
+            emit_prefetch_progress(app, "mods", step, total, &item.display_name, "ok", "");
+        }
     }
 
     emit_prefetch_done(app, "mods");

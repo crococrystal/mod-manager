@@ -12,7 +12,6 @@ import {
   updateModTags,
   uploadCover
 } from './api.js';
-import { IconButton } from './components/Button.jsx';
 import { TitleBar } from './components/TitleBar.jsx';
 import { NoticeModal } from './components/NoticeModal.jsx';
 import { UpdateModal } from './components/UpdateModal.jsx';
@@ -26,6 +25,7 @@ import { SettingsDialog } from './features/settings/SettingsDialog.jsx';
 import { useAppUpdater } from './hooks/useAppUpdater.js';
 import { canCheckForUpdates } from './lib/updater.js';
 import { filters } from './lib/modMeta.jsx';
+import headerAppLogo from './assets/header-app-logo.svg';
 import { normalizeModsGraph } from './lib/usedBy.js';
 import './styles/index.css';
 
@@ -695,13 +695,52 @@ function App() {
 
   const progressLabel =
     bootstrapping && progress
-      ? `${progress.kind === 'covers' ? 'Обложки' : progress.kind === 'dependencies' ? 'Зависимости' : 'Моды'} · ${progress.index}/${progress.total}${
+      ? `Подготовка · ${progress.index}/${progress.total}${
           progress.name ? ` · ${progress.name}` : ''
         }`
       : '';
 
   const toolbar = canShowWorkspace ? (
     <div className="topToolbar" data-tauri-drag-region>
+      <img
+        src={headerAppLogo}
+        alt="Mod Manager"
+        className="topToolbarLogo"
+        data-tauri-drag-region
+      />
+      <div className="segments" data-tauri-drag-region>
+        {filters.map((item) => {
+          const isActive = filter === item.id;
+          const Icon = item.icon ?? SlidersHorizontal;
+          const showIcon = Boolean(item.icon) || !isActive;
+          return (
+            <button
+              key={item.id}
+              className={isActive ? 'active' : ''}
+              onClick={() => setFilter(item.id)}
+              type="button"
+              disabled={busy}
+              title={item.label}
+              aria-label={item.label}
+              data-tauri-drag-region="false"
+            >
+              {showIcon ? <Icon className={`tagIcon ${item.tone ?? ''}`} size={13} /> : null}
+              {isActive ? <span>{item.label}</span> : null}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className={`segmentsSettings${settingsOpen ? ' active' : ''}`}
+          onClick={() => setSettingsOpen(true)}
+          disabled={busy}
+          aria-label="Настройки"
+          title="Настройки"
+          data-tauri-drag-region="false"
+        >
+          <Settings size={13} />
+        </button>
+      </div>
       <label className="search" data-tauri-drag-region="false">
         <Search size={14} />
         <input
@@ -711,42 +750,28 @@ function App() {
           data-tauri-drag-region="false"
         />
       </label>
-      <div className="segments" data-tauri-drag-region>
-        {filters.map((item) => {
-          const Icon = item.icon ?? SlidersHorizontal;
-          return (
-            <button
-              key={item.id}
-              className={filter === item.id ? 'active' : ''}
-              onClick={() => setFilter(item.id)}
-              type="button"
-              disabled={busy}
-              data-tauri-drag-region="false"
-            >
-              {item.icon ? <Icon className={`tagIcon ${item.tone}`} size={13} /> : null}
-              <span>{item.label}</span>
-            </button>
-          );
-        })}
-      </div>
-      <div className="topActions">
-        <IconButton
-          icon={Settings}
-          label="Настройки"
-          onClick={() => setSettingsOpen(true)}
-          disabled={busy}
-        />
-      </div>
     </div>
   ) : (
     <div className="topToolbar topToolbarEmpty" data-tauri-drag-region>
-      <span className="titleBarName" data-tauri-drag-region>Mod Manager</span>
-      <IconButton
-        icon={Settings}
-        label="Настройки"
-        onClick={() => setSettingsOpen(true)}
-        disabled={busy}
+      <img
+        src={headerAppLogo}
+        alt="Mod Manager"
+        className="topToolbarLogo"
+        data-tauri-drag-region
       />
+      <div className="segments" data-tauri-drag-region>
+        <button
+          type="button"
+          className={`segmentsSettings${settingsOpen ? ' active' : ''}`}
+          onClick={() => setSettingsOpen(true)}
+          disabled={busy}
+          aria-label="Настройки"
+          title="Настройки"
+          data-tauri-drag-region="false"
+        >
+          <Settings size={13} />
+        </button>
+      </div>
     </div>
   );
 

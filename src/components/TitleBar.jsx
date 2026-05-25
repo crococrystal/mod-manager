@@ -6,6 +6,23 @@ const platform = typeof navigator !== 'undefined' ? navigator.platform : '';
 const isMac = /Mac|iPhone|iPod|iPad/i.test(platform);
 const isWindows = /Win/i.test(platform);
 
+function isPreviewWindowsChrome() {
+  if (!import.meta.env.DEV) return false;
+  const v = String(import.meta.env.VITE_PREVIEW_WINDOWS_CHROME ?? '');
+  return v === 'true' || v === '1';
+}
+
+const previewWindowsChrome = isPreviewWindowsChrome();
+const useWindowsChrome = isWindows || previewWindowsChrome;
+
+async function applyWindowsChrome() {
+  const win = getCurrentWindow();
+  if (previewWindowsChrome && isMac) {
+    await win.setTitleBarStyle('visible').catch(() => {});
+  }
+  await win.setDecorations(false).catch(() => {});
+}
+
 function WindowsControls() {
   const [maximized, setMaximized] = useState(false);
 
@@ -57,23 +74,23 @@ function WindowsControls() {
 
 export function TitleBar({ children }) {
   useEffect(() => {
-    if (!isWindows) return;
-    getCurrentWindow()
-      .setDecorations(false)
-      .catch(() => {});
+    if (!useWindowsChrome) return;
+    void applyWindowsChrome();
   }, []);
 
-  const className = `titleBar ${
-    isMac ? 'titleBarMac' : isWindows ? 'titleBarWindows' : 'titleBarOther'
-  }`;
+  const titleBarClass = useWindowsChrome
+    ? 'titleBarWindows'
+    : isMac
+      ? 'titleBarMac'
+      : 'titleBarOther';
 
   return (
-    <header className={className} data-tauri-drag-region>
+    <header className={`titleBar ${titleBarClass}`} data-tauri-drag-region>
       <div className="titleBarSpacer" data-tauri-drag-region aria-hidden="true" />
       <div className="titleBarContent" data-tauri-drag-region>
         {children}
       </div>
-      {isWindows ? <WindowsControls /> : null}
+      {useWindowsChrome ? <WindowsControls /> : null}
     </header>
   );
 }

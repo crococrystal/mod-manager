@@ -111,12 +111,21 @@ main {
   height: 100%;
 }
 
+.titleBarMac {
+  padding-left: 8px;
+}
+
 .titleBarMac .titleBarSpacer {
-  width: 84px;
+  width: 76px;
 }
 
 .titleBarWindows .titleBarSpacer {
-  width: 8px;
+  width: 0;
+}
+
+.titleBarWindows {
+  padding-left: 8px;
+  padding-right: 0;
 }
 
 .winControls {
@@ -125,6 +134,7 @@ main {
   align-items: stretch;
   align-self: stretch;
   margin-left: 6px;
+  margin-right: 0;
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
@@ -176,6 +186,18 @@ main {
   gap: 8px;
   min-width: 0;
   height: 100%;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.topToolbarLogo {
+  flex-shrink: 0;
+  height: 22px;
+  width: auto;
+  margin-right: 14px;
+  display: block;
+  pointer-events: none;
+  user-select: none;
   -webkit-app-region: drag;
   app-region: drag;
 }
@@ -331,7 +353,7 @@ h1 {
 
 .topToolbar .search {
   display: flex;
-  flex: 1 1 240px;
+  flex: 0 1 360px;
   align-items: center;
   width: auto;
   min-width: 140px;
@@ -360,7 +382,7 @@ h1 {
 .topToolbar .segments {
   display: flex;
   flex: 0 1 auto;
-  gap: 2px;
+  gap: 0;
   min-width: 0;
   max-width: 100%;
   border: 1px solid #39454b;
@@ -388,6 +410,10 @@ h1 {
   white-space: nowrap;
 }
 
+.topToolbar .segments button:not(.active):not(.segmentsSettings) {
+  padding: 0 8px;
+}
+
 .topToolbar .topActions {
   display: flex;
   flex-shrink: 0;
@@ -412,6 +438,18 @@ h1 {
 .segments button:hover {
   background: #3d5553;
   color: #f5fbfa;
+}
+
+.topToolbar .segments button + button {
+  border-left: 1px solid #39454b;
+}
+
+.topToolbar .segments button.segmentsSettings {
+  padding: 0 9px;
+}
+
+.topToolbarEmpty .segments {
+  margin-left: auto;
 }
 
 @media (max-width: 1080px) {

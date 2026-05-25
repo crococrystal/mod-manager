@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:app": "tauri dev",
+    "dev:app": "bash scripts/dev-app.sh",
+    "dev:app:win": "PREVIEW_WINDOWS_CHROME=1 bash scripts/dev-app.sh",
     "build": "vite build",
     "app": "bash -c 'set -a && [ -f .env ] && . ./.env && set +a && npx tauri build --bundles app'",
     "app:dmg": "bash -c 'set -a && [ -f .env ] && . ./.env && set +a && export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-} && export CARGO_TARGET_DIR=$PWD/src-tauri/target && npx tauri build --bundles app,dmg'",
