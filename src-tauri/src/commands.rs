@@ -192,66 +192,71 @@ pub(crate) async fn switch_mod_source(
     app: AppHandle,
     request: SwitchModSourceRequest,
 ) -> Result<ModListPayload, String> {
-    let target = request.source.trim().to_ascii_lowercase();
-    if target != "modrinth" && target != "curseforge" {
-        return Err("Можно выбрать только Modrinth или CurseForge.".to_string());
-    }
-
-    let settings = read_settings(&app)?;
-    let paths = resolve_paths(&settings)?;
-    let catalog_root = catalog::catalog_root(&app).ok();
-    let mods = scan_mods_for_settings(&settings, catalog_root.clone())?;
-    let selected = mods
-        .iter()
-        .find(|item| item.key == request.key)
-        .ok_or_else(|| "Мод не найден в текущей сборке.".to_string())?;
-
-    let client = http_client().ok_or_else(|| "Не удалось создать HTTP-клиент.".to_string())?;
-    let mut tags = read_tags(&paths.tags_path)?;
-    let tag = tags.mods.entry(request.key.clone()).or_default();
-
-    match target.as_str() {
-        "modrinth" => {
-            if selected.modrinth_id.is_none() && tag.modrinth_id.trim().is_empty() {
-                let project = modrinth_search_project(&client, &selected.display_name)
-                    .ok_or_else(|| "Мод не найден на Modrinth.".to_string())?;
-                tag.modrinth_id = project.id;
-            }
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<ModListPayload, String> {
+        let target = request.source.trim().to_ascii_lowercase();
+        if target != "modrinth" && target != "curseforge" {
+            return Err("Можно выбрать только Modrinth или CurseForge.".to_string());
         }
-        "curseforge" => {
-            if selected.curseforge_id.is_none() && tag.curseforge_id.trim().is_empty() {
-                if settings.curseforge_api_key.trim().is_empty() {
-                    return Err("Для поиска на CurseForge нужен API key.".to_string());
+
+        let settings = read_settings(&app_handle)?;
+        let paths = resolve_paths(&settings)?;
+        let catalog_root = catalog::catalog_root(&app_handle).ok();
+        let mods = scan_mods_for_settings(&settings, catalog_root.clone())?;
+        let selected = mods
+            .iter()
+            .find(|item| item.key == request.key)
+            .ok_or_else(|| "Мод не найден в текущей сборке.".to_string())?;
+        let display_name = selected.display_name.clone();
+        let has_modrinth = selected.modrinth_id.is_some();
+        let has_curseforge = selected.curseforge_id.is_some();
+
+        let client = http_client().ok_or_else(|| "Не удалось создать HTTP-клиент.".to_string())?;
+        let mut tags = read_tags(&paths.tags_path)?;
+        let tag = tags.mods.entry(request.key.clone()).or_default();
+
+        match target.as_str() {
+            "modrinth" => {
+                if !has_modrinth && tag.modrinth_id.trim().is_empty() {
+                    let project = modrinth_search_project(&client, &display_name)
+                        .ok_or_else(|| "Мод не найден на Modrinth.".to_string())?;
+                    tag.modrinth_id = project.id;
                 }
-                let project = curseforge_search_mod(
-                    &client,
-                    &settings.curseforge_api_key,
-                    &selected.display_name,
-                )
-                .ok_or_else(|| "Мод не найден на CurseForge.".to_string())?;
-                tag.curseforge_id = project.id;
-                tag.curseforge_slug = project.slug.unwrap_or_default();
             }
+            "curseforge" => {
+                if !has_curseforge && tag.curseforge_id.trim().is_empty() {
+                    if settings.curseforge_api_key.trim().is_empty() {
+                        return Err("Для поиска на CurseForge нужен API key.".to_string());
+                    }
+                    let project = curseforge_search_mod(
+                        &client,
+                        &settings.curseforge_api_key,
+                        &display_name,
+                    )
+                    .ok_or_else(|| "Мод не найден на CurseForge.".to_string())?;
+                    tag.curseforge_id = project.id;
+                    tag.curseforge_slug = project.slug.unwrap_or_default();
+                }
+            }
+            _ => unreachable!(),
         }
-        _ => unreachable!(),
-    }
 
-    tag.source = target;
-    tag.updated_at = now_iso();
-    tags.updated_at = now_iso();
-    write_tags(&paths.tags_path, &tags)?;
+        tag.source = target;
+        tag.updated_at = now_iso();
+        tags.updated_at = now_iso();
+        write_tags(&paths.tags_path, &tags)?;
 
-    let view = settings_view(&app, settings.clone())?;
-    let mods =
-        tauri::async_runtime::spawn_blocking(move || scan_mods_for_settings(&settings, catalog_root))
-            .await
-            .map_err(|error| format!("Сканирование прервано: {error}"))??;
-    let stats = stats_for(&mods);
-    Ok(ModListPayload {
-        settings: view,
-        mods,
-        stats,
+        let view = settings_view(&app_handle, settings.clone())?;
+        let mods = scan_mods_for_settings(&settings, catalog_root)?;
+        let stats = stats_for(&mods);
+        Ok(ModListPayload {
+            settings: view,
+            mods,
+            stats,
+        })
     })
+    .await
+    .map_err(|error| format!("Переключение поставщика прервано: {error}"))?
 }
 
 #[tauri::command]
