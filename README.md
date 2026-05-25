@@ -4,16 +4,7 @@ Native Tauri app for keeping Minecraft modpack metadata outside jar filenames.
 
 ## Download
 
-Installers for **Windows** and **macOS (Apple Silicon)**:
-
-**https://github.com/crococrystal/mod-manager-releases/releases/latest**
-
-Direct links (version may change after each build — the Releases page always has the latest):
-
-- [macOS `.dmg`](https://github.com/crococrystal/mod-manager-releases/releases/latest)
-- [Windows `.exe`](https://github.com/crococrystal/mod-manager-releases/releases/latest)
-
-In-app updates: **Settings → Update** after install.
+https://github.com/crococrystal/mod-manager-releases/releases/latest
 
 ## Current MVP
 

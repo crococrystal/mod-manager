@@ -123,31 +123,21 @@ jobs:
             exit 1
           fi
 
-          notes="Automatically updated from crococrystal/mod-manager@${SOURCE_SHA}."
+          notes="Built from crococrystal/mod-manager@${SOURCE_SHA}.
 
-          version="$(node -p "require('./package.json').version")"
-          base="https://github.com/${RELEASES_REPO}/releases/download/latest"
-          release_notes="$(cat <<EOF
-${notes}
-
-## Download
-
-- [macOS (Apple Silicon) — Mod.Manager_${version}_aarch64.dmg](${base}/Mod.Manager_${version}_aarch64.dmg)
-- [Windows x64 — Mod.Manager_${version}_x64-setup.exe](${base}/Mod.Manager_${version}_x64-setup.exe)
-EOF
-)"
+https://github.com/${RELEASES_REPO}/releases/latest"
 
           if gh release view latest --repo "${RELEASES_REPO}" >/dev/null 2>&1; then
             gh release edit latest \
               --repo "${RELEASES_REPO}" \
               --title "Latest build" \
-              --notes "${release_notes}" \
+              --notes "${notes}" \
               --latest
           else
             gh release create latest \
               --repo "${RELEASES_REPO}" \
               --title "Latest build" \
-              --notes "${release_notes}" \
+              --notes "${notes}" \
               --latest \
               --target main
           fi
@@ -182,8 +172,7 @@ EOF
           git config user.name "github-actions[bot]"
           git add README.md
           git diff --staged --quiet && exit 0
-          version="$(node -p "require('${GITHUB_WORKSPACE}/package.json').version")"
-          git commit -m "Update download links for v${version}"
+          git commit -m "Update README"
           git push
 
       - name: Publish tagged release
