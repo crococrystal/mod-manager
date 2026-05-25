@@ -2,10 +2,9 @@ name: Build
 
 on:
   workflow_dispatch:
-  # Автосборка на push временно отключена — собирай локально или запускай workflow вручную.
-  # push:
-  #   branches: [main]
-  #   tags: ['v*']
+  push:
+    branches: [main]
+    tags: ['v*']
 
 env:
   RELEASES_REPO: crococrystal/mod-manager-releases
