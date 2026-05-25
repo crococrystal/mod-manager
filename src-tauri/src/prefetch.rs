@@ -2,6 +2,8 @@ use std::{collections::HashMap, path::PathBuf};
 
 use tauri::AppHandle;
 
+use crate::bootstrap::bootstrap_still_active;
+
 use crate::catalog;
 use crate::covers::{apply_existing_cover, fetch_mod_cover};
 use crate::dependencies::same_dependency_list;
@@ -110,6 +112,7 @@ pub(crate) fn prefetch_mod_assets_for_settings(
     app: &AppHandle,
     run_covers: bool,
     run_dependencies: bool,
+    bootstrap_token: u64,
 ) -> Result<PrefetchReport, String> {
     let paths = resolve_paths(settings)?;
     let catalog_root: Option<PathBuf> = catalog::catalog_root(app).ok();
@@ -146,6 +149,11 @@ pub(crate) fn prefetch_mod_assets_for_settings(
     let total = mods.len() as u32;
 
     for (index, item) in mods.iter_mut().enumerate() {
+        if !bootstrap_still_active(app, bootstrap_token) {
+            emit_prefetch_done(app, "mods");
+            return Err("Прервано: выбрана другая сборка.".to_string());
+        }
+
         let step = index as u32 + 1;
         emit_prefetch_progress(app, "mods", step, total, &item.display_name, "fetch", "");
 

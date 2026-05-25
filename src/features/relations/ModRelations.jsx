@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import { ModCover } from '../mods/ModCover.jsx';
+import { ModModalHead } from '../mods/ModModalHead.jsx';
+import { modModalSubtitle } from '../../lib/modMeta.jsx';
 
 function relationsViewFor(hasDeps, hasUsed) {
   if (hasDeps && hasUsed) return 'dual';
@@ -191,13 +193,7 @@ export function ModRelations({
   const relationsModal =
     modal === 'relations' && activeView === 'dual' ? (
       <div className="dependencyModalDual" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dependencyModalHead">
-          <ModCover mod={currentMod} size="tile" />
-          <div className="dependencyModalHeadText">
-            <p className="dependencyModalSubtitle">{currentMod.displayName}</p>
-            <h3 className="dependencyModalTitle">Связи</h3>
-          </div>
-        </div>
+        <ModModalHead mod={currentMod} subtitle={modModalSubtitle(currentMod, { section: 'Связи' })} />
         <div className="dependencyModalDualGrid" role="dialog" aria-modal="true" aria-label="Связи мода">
           <section className="dependencyModalPane">
             <header className="dependencyModalPaneHead">
@@ -230,13 +226,7 @@ export function ModRelations({
       </div>
     ) : modal === 'relations' && activeView === 'manage' ? (
       <div className="dependencyModalStack" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dependencyModalHead">
-          <ModCover mod={currentMod} size="tile" />
-          <div className="dependencyModalHeadText">
-            <p className="dependencyModalSubtitle">{currentMod.displayName}</p>
-            <h3 className="dependencyModalTitle">Зависимости</h3>
-          </div>
-        </div>
+        <ModModalHead mod={currentMod} subtitle={modModalSubtitle(currentMod, { section: 'Зависимости' })} />
         <div
           className="dependencyModal dependencyModalManage dependencyModalWithAdd"
           role="dialog"
@@ -263,13 +253,11 @@ export function ModRelations({
       </div>
     ) : modal === 'relations' && activeView === 'used' ? (
       <div className="dependencyModalStack" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dependencyModalHead">
-          <ModCover mod={currentMod} size="tile" />
-          <div className="dependencyModalHeadText">
-            <p className="dependencyModalSubtitle">{currentMod.displayName}</p>
-            <h3 className="dependencyModalTitle">Используется для</h3>
-          </div>
-        </div>
+        <ModModalHead
+          mod={currentMod}
+          subtitle={modModalSubtitle(currentMod, { section: 'Используется для' })}
+          titleFirst
+        />
         <div
           className="dependencyModal dependencyModalManage"
           role="dialog"
@@ -284,13 +272,7 @@ export function ModRelations({
   const modalContent =
     modal === 'add' ? (
       <div className="dependencyModalStack" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dependencyModalHead">
-          <ModCover mod={currentMod} size="tile" />
-          <div className="dependencyModalHeadText">
-            <p className="dependencyModalSubtitle">{currentMod.displayName}</p>
-            <h3 className="dependencyModalTitle">Зависимости</h3>
-          </div>
-        </div>
+        <ModModalHead mod={currentMod} subtitle={modModalSubtitle(currentMod, { section: 'Зависимости' })} />
         <div
           className="dependencyModal dependencyModalAdd"
           role="dialog"

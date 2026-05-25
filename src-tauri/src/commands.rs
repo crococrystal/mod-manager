@@ -2,8 +2,9 @@ use std::path::PathBuf;
 
 use base64::{engine::general_purpose, Engine};
 use serde::Deserialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
+use crate::bootstrap::{bootstrap_still_active, cancel_active_bootstrap};
 use crate::catalog;
 use crate::covers::{cover_ext_from_mime, delete_manual_cover, store_uploaded_cover};
 use crate::instance_registry;
@@ -66,10 +67,16 @@ pub(crate) fn save_settings(
     app: AppHandle,
     mut settings: Settings,
 ) -> Result<SettingsView, String> {
+    let previous = read_settings(&app).ok();
+    let instance_changed = previous.as_ref().map(|item| &item.instance_root) != Some(&settings.instance_root);
+
     if let Some(root) = settings.instance_root.clone() {
         remember_instance(&mut settings, &root);
     }
     write_settings(&app, &settings)?;
+    if instance_changed {
+        cancel_active_bootstrap(&app);
+    }
     if let Ok(paths) = resolve_paths(&settings) {
         mods_watch::sync_mods_watch(&app, Some(paths.mods_dir));
     } else {
@@ -106,9 +113,18 @@ pub(crate) async fn bootstrap_instance(
     let fingerprint = instance_registry::mods_fingerprint(&paths.mods_dir)?;
     let force = force.unwrap_or(false);
     let app_handle = app.clone();
+    let bootstrap_token = {
+        let state = app.state::<crate::bootstrap::BootstrapState>();
+        state.cancel_active();
+        state.snapshot()
+    };
 
     let result = tauri::async_runtime::spawn_blocking(
         move || -> Result<instance_registry::BootstrapResult, String> {
+            if !bootstrap_still_active(&app_handle, bootstrap_token) {
+                return Err("Прервано: выбрана другая сборка.".to_string());
+            }
+
             let mut registry = instance_registry::read_registry(&app_handle)?;
             let now = now_iso();
             instance_registry::touch_opened(&mut registry, &paths.instance_root, &now);
@@ -139,6 +155,7 @@ pub(crate) async fn bootstrap_instance(
                     &app_handle,
                     run_covers,
                     run_dependencies,
+                    bootstrap_token,
                 )?;
                 covers_prepared = !run_covers || report.failed == 0;
             }

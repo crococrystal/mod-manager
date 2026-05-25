@@ -169,11 +169,14 @@ function App() {
   const [providerKey, setProviderKey] = useState(null);
   const [versionKey, setVersionKey] = useState(null);
   const [tagsKey, setTagsKey] = useState(null);
+  const [tagsAnchor, setTagsAnchor] = useState(null);
+  const [tagsSavingKey, setTagsSavingKey] = useState(null);
   const [descriptionKey, setDescriptionKey] = useState(null);
   const [sort, setSort] = useState({ key: 'name', direction: 'asc' });
   const watcherReloadingRef = useRef(false);
   const watcherReloadPendingRef = useRef(false);
   const selectionAnchorRef = useRef(null);
+  const bootstrapRunRef = useRef(0);
 
   const mods = payload?.mods ?? EMPTY_MODS;
   const stats = payload?.stats ?? EMPTY_STATS;
@@ -253,18 +256,26 @@ function App() {
       if (!cacheStatus?.instanceRoot && !force) return;
       if (!needsBootstrap(cacheStatus, { force })) return;
 
+      const runId = ++bootstrapRunRef.current;
       setBootstrapping(true);
       setError('');
+      setProgress(null);
       try {
         const result = await bootstrapInstance(force);
+        if (runId !== bootstrapRunRef.current) return;
         if (!result?.skipped) {
           await reload({ silent: true });
         }
       } catch (err) {
-        setError(String(err));
+        if (runId !== bootstrapRunRef.current) return;
+        const message = String(err);
+        if (message.includes('Прервано') || message.includes('другая сборка')) return;
+        setError(message);
       } finally {
-        setBootstrapping(false);
-        setProgress(null);
+        if (runId === bootstrapRunRef.current) {
+          setBootstrapping(false);
+          setProgress(null);
+        }
       }
     },
     [reload]
@@ -445,6 +456,10 @@ function App() {
 
   const handleSaveSettings = useCallback(
     async (nextSettings, options = {}) => {
+      const instanceChanged = nextSettings.instanceRoot !== (settings?.instanceRoot ?? null);
+      if (instanceChanged) {
+        setProgress(null);
+      }
       setBusy(true);
       setError('');
       try {
@@ -465,7 +480,7 @@ function App() {
         setBusy(false);
       }
     },
-    [applyPayload, runBootstrap]
+    [applyPayload, runBootstrap, settings?.instanceRoot]
   );
 
   const patchMod = useCallback(
@@ -479,6 +494,22 @@ function App() {
         setError(String(err));
       } finally {
         setBusy(false);
+      }
+    },
+    [applyPayload]
+  );
+
+  const patchModTagsInstant = useCallback(
+    async (key, patch) => {
+      setTagsSavingKey(key);
+      setError('');
+      try {
+        const next = await updateModTags({ key, ...patch });
+        applyPayload(next);
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setTagsSavingKey(null);
       }
     },
     [applyPayload]
@@ -690,7 +721,7 @@ function App() {
           icon={Settings}
           label="Настройки"
           onClick={() => setSettingsOpen(true)}
-          disabled={busy || bootstrapping}
+          disabled={busy}
         />
       </div>
     </div>
@@ -701,7 +732,7 @@ function App() {
         icon={Settings}
         label="Настройки"
         onClick={() => setSettingsOpen(true)}
-        disabled={busy || bootstrapping}
+        disabled={busy}
       />
     </div>
   );
@@ -735,7 +766,10 @@ function App() {
               onCoverClick={openRelationsForMod}
               onSourceClick={(mod) => setProviderKey(mod.key)}
               onVersionClick={(mod) => setVersionKey(mod.key)}
-              onTagsClick={(mod) => setTagsKey(mod.key)}
+              onTagsClick={(mod, anchor) => {
+                setTagsKey(mod.key);
+                setTagsAnchor(anchor);
+              }}
               onDescriptionClick={(mod) => setDescriptionKey(mod.key)}
             />
             <aside>
@@ -812,9 +846,14 @@ function App() {
 
       <TagsDialog
         mod={tagsMod}
-        busy={busy}
-        onClose={() => !busy && setTagsKey(null)}
-        onSave={patchMod}
+        anchor={tagsAnchor}
+        savingKey={tagsSavingKey}
+        onClose={() => {
+          if (tagsSavingKey) return;
+          setTagsKey(null);
+          setTagsAnchor(null);
+        }}
+        onSave={patchModTagsInstant}
       />
 
       <DescriptionDialog

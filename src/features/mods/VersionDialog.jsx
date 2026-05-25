@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Download, LoaderCircle } from 'lucide-react';
 import { installProviderVersion, listProviderVersions } from '../../api.js';
-import { formatDate, sourceIcons } from '../../lib/modMeta.jsx';
-import { ModCover } from './ModCover.jsx';
+import { formatDate, modModalSubtitle } from '../../lib/modMeta.jsx';
+import { ModModalHead } from './ModModalHead.jsx';
 
 function projectIdFor(mod) {
   if (mod?.source === 'modrinth') return mod.modrinthId;
@@ -93,9 +93,10 @@ export function VersionDialog({ mod, busy, onClose, onInstalled }) {
   if (!mod) return null;
 
   const projectId = projectIdFor(mod);
-  const provider = sourceIcons[mod.source]?.label ?? mod.source;
   const target = payload?.target;
-  const targetLabel = [target?.minecraftVersion, target?.loader].filter(Boolean).join(' · ');
+  const subtitle = modModalSubtitle(mod, {
+    parts: [target?.minecraftVersion, target?.loader]
+  });
   const uiLocked = busy || loading || Boolean(installingId);
 
   async function install(version) {
@@ -125,13 +126,7 @@ export function VersionDialog({ mod, busy, onClose, onInstalled }) {
   return createPortal(
     <div className="dependencyModalBackdrop" onMouseDown={() => !uiLocked && onClose()}>
       <div className="dependencyModalStack versionModalStack" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dependencyModalHead">
-          <ModCover mod={mod} size="tile" />
-          <div className="dependencyModalHeadText">
-            <p className="dependencyModalSubtitle">{provider}{targetLabel ? ` · ${targetLabel}` : ''}</p>
-            <h3 className="dependencyModalTitle">{mod.displayName}</h3>
-          </div>
-        </div>
+        <ModModalHead mod={mod} subtitle={subtitle} />
 
         {error ? <p className="providerSearchError">{error}</p> : null}
 

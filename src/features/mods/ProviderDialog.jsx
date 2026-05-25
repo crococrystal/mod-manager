@@ -6,8 +6,8 @@ import {
   searchProviderCandidates,
   switchModSource
 } from '../../api.js';
-import { sourceIcons } from '../../lib/modMeta.jsx';
-import { ModCover } from './ModCover.jsx';
+import { sourceIcons, modModalSubtitle } from '../../lib/modMeta.jsx';
+import { ModModalHead } from './ModModalHead.jsx';
 
 const providerOptions = [
   { id: 'modrinth', label: 'Modrinth' },
@@ -128,26 +128,26 @@ export function ProviderDialog({
   const hasProviderSource = mod.source === 'modrinth' || mod.source === 'curseforge';
   const showProviderPageLink = step === 'providers' && hasProviderSource && mod.sourceUrl;
 
+  const providerSubtitle =
+    step === 'providers'
+      ? modModalSubtitle(mod, { section: 'Поставщик' })
+      : providerOptions.find((item) => item.id === platform)?.label ?? 'Поставщик';
+
   return createPortal(
     <div className="dependencyModalBackdrop" onMouseDown={() => !uiLocked && onClose()}>
       <div className="dependencyModalStack providerModalStack" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dependencyModalHead">
-          <ModCover mod={mod} size="tile" />
-          <div className="dependencyModalHeadText">
-            <p className="dependencyModalSubtitle">{mod.displayName}</p>
-            <div className="dependencyModalTitleRow">
-              <h3 className="dependencyModalTitle">
-                {step === 'providers' ? 'Поставщик' : providerOptions.find((item) => item.id === platform)?.label}
-              </h3>
-              {showProviderPageLink ? (
-                <a className="providerCurrentLink" href={mod.sourceUrl} target="_blank" rel="noreferrer">
-                  <ExternalLink size={14} />
-                  Открыть страницу
-                </a>
-              ) : null}
-            </div>
-          </div>
-        </div>
+        <ModModalHead
+          mod={mod}
+          subtitle={providerSubtitle}
+          actions={
+            showProviderPageLink ? (
+              <a className="providerCurrentLink" href={mod.sourceUrl} target="_blank" rel="noreferrer">
+                <ExternalLink size={14} />
+                Открыть страницу
+              </a>
+            ) : null
+          }
+        />
 
         {searchError ? <p className="providerSearchError">{searchError}</p> : null}
 

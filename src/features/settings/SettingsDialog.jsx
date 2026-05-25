@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Folder, FolderOpen, Info, RefreshCw } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Folder, FolderOpen, Info, RefreshCw, Trash2 } from 'lucide-react';
 import { getVersion } from '@tauri-apps/api/app';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -33,15 +33,6 @@ function instanceNameFromPath(path) {
   return parts[parts.length - 1] || path;
 }
 
-function formatStatus(status) {
-  if (!status) return 'не подготовлена';
-  if (status.ready) return 'кэш готов';
-  const missing = [];
-  if (status.needsCovers) missing.push('обложки');
-  if (status.needsDependencies) missing.push('зависимости');
-  return missing.length ? `нужно: ${missing.join(' и ')}` : 'готово к проверке';
-}
-
 export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
   const [draft, setDraft] = useState(() => settings ?? {});
   const [message, setMessage] = useState('');
@@ -49,9 +40,10 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
   const [clearing, setClearing] = useState(false);
   const [appVersion, setAppVersion] = useState('');
   const [updateStatus, setUpdateStatus] = useState('idle');
+  const [updateNotice, setUpdateNotice] = useState(null);
+  const updateNoticeTimerRef = useRef(null);
 
-  const hasPack = Boolean(draft.instanceRoot);
-  const cacheStatus = settings?.cacheStatus;
+  const packLocked = busy || clearing;
   const recent = useMemo(() => {
     const list = settings?.recentInstances ?? [];
     return list.filter((item) => item && item !== draft.instanceRoot);
@@ -68,21 +60,42 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
       .catch(() => {});
   }, []);
 
+  useEffect(() => () => {
+    if (updateNoticeTimerRef.current) clearTimeout(updateNoticeTimerRef.current);
+  }, []);
+
+  function clearUpdateNoticeTimer() {
+    if (!updateNoticeTimerRef.current) return;
+    clearTimeout(updateNoticeTimerRef.current);
+    updateNoticeTimerRef.current = null;
+  }
+
+  function showUpToDateNotice() {
+    clearUpdateNoticeTimer();
+    setUpdateNotice({ tone: 'ok', text: 'У вас актуальная версия' });
+    updateNoticeTimerRef.current = setTimeout(() => {
+      setUpdateNotice(null);
+      updateNoticeTimerRef.current = null;
+    }, 3000);
+  }
+
   async function checkUpdates() {
     if (!canCheckForUpdates()) return;
     setUpdateStatus('checking');
-    setMessage('');
+    clearUpdateNoticeTimer();
+    setUpdateNotice(null);
     try {
       const update = await checkForAppUpdate();
       if (!update) {
         setUpdateStatus('idle');
+        showUpToDateNotice();
         return;
       }
       setUpdateStatus('installing');
       await installAppUpdate(update);
     } catch (err) {
       setUpdateStatus('idle');
-      setMessage(String(err));
+      setUpdateNotice({ tone: 'error', text: String(err) });
     }
   }
 
@@ -112,6 +125,15 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
     onClose?.();
   }
 
+  async function removeRecent(path, event) {
+    event.stopPropagation();
+    const nextRecent = (settings?.recentInstances ?? []).filter((item) => item !== path);
+    const next = { ...draft, recentInstances: nextRecent };
+    setDraft(next);
+    setMessage('');
+    await onSave(toSettings(next), { bootstrap: false, scan: false });
+  }
+
   async function openCurseForgeHelp() {
     await openUrl('https://console.curseforge.com/?#/api-keys');
   }
@@ -131,7 +153,7 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
     }
   }
 
-  const uiBusy = busy || clearing || updateBusy;
+  const uiBusy = packLocked || updateBusy;
 
   return (
     <Modal
@@ -185,13 +207,10 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
               readOnly
               placeholder="/Users/.../PrismLauncher/instances/Pack"
             />
-            <Button icon={FolderOpen} onClick={pickFolder} disabled={uiBusy}>
+            <Button icon={FolderOpen} onClick={pickFolder} disabled={packLocked}>
               Выбрать
             </Button>
           </div>
-          {hasPack ? (
-            <p className="cacheHint">Статус: {formatStatus(cacheStatus)}.</p>
-          ) : null}
         </label>
 
         {recent.length ? (
@@ -199,16 +218,26 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
             <span className="fieldLabel">Недавние сборки</span>
             <ul className="recentList">
               {recent.map((path) => (
-                <li key={path}>
+                <li key={path} className="recentRow">
                   <button
                     type="button"
                     className="recentItem"
                     onClick={() => useRecent(path)}
-                    disabled={uiBusy}
+                    disabled={packLocked}
                     title={path}
                   >
                     <Folder size={15} />
                     <span className="recentName">{instanceNameFromPath(path)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="recentRemove"
+                    onClick={(event) => removeRecent(path, event)}
+                    disabled={packLocked}
+                    aria-label="Удалить из недавних"
+                    title="Удалить"
+                  >
+                    <Trash2 size={15} />
                   </button>
                 </li>
               ))}
@@ -218,7 +247,14 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
 
         {canCheckForUpdates() ? (
           <div className="settingsUpdateBar">
-            <span className="settingsUpdateVersion">{appVersion || '—'}</span>
+            <span
+              className={[
+                'settingsUpdateVersion',
+                updateNotice ? `settingsUpdateVersion--${updateNotice.tone}` : ''
+              ].filter(Boolean).join(' ')}
+            >
+              {updateNotice ? updateNotice.text : (appVersion || '—')}
+            </span>
             <button
               type="button"
               className="settingsUpdateAction"

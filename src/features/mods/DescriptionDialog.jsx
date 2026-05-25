@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ModCover } from './ModCover.jsx';
+import { modModalSubtitle } from '../../lib/modMeta.jsx';
+import { ModModalHead } from './ModModalHead.jsx';
 
 export function DescriptionDialog({ mod, busy, onClose, onSave }) {
   const [description, setDescription] = useState(mod?.description ?? '');
@@ -21,13 +22,7 @@ export function DescriptionDialog({ mod, busy, onClose, onSave }) {
   return createPortal(
     <div className="dependencyModalBackdrop" onMouseDown={() => !busy && onClose()}>
       <div className="dependencyModalStack compactModalStack" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="dependencyModalHead">
-          <ModCover mod={mod} size="tile" />
-          <div className="dependencyModalHeadText">
-            <p className="dependencyModalSubtitle">{mod.filename}</p>
-            <h3 className="dependencyModalTitle">Описание</h3>
-          </div>
-        </div>
+        <ModModalHead mod={mod} subtitle={modModalSubtitle(mod, { section: 'Описание' })} />
         <div className="compactModal" role="dialog" aria-modal="true" aria-label="Описание мода">
           <textarea
             ref={textareaRef}
