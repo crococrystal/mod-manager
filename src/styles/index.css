@@ -2088,6 +2088,45 @@ dd {
   background: #12181b;
 }
 
+.settingsUpdateBar--busy {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.settingsUpdateMain {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settingsUpdateVersion--progress {
+  color: #b8c4ca;
+}
+
+.settingsUpdateProgressTrack {
+  height: 3px;
+  border-radius: 999px;
+  background: #273034;
+  overflow: hidden;
+}
+
+.settingsUpdateProgressBar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #3d7ea6, #5c9fd6);
+  transition: width 0.15s ease;
+}
+
+.settingsUpdateProgressBar.indeterminate {
+  width: 36% !important;
+  animation: settingsUpdateIndeterminate 1.1s ease-in-out infinite;
+}
+
+@keyframes settingsUpdateIndeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
 .settingsUpdateVersion {
   color: #8a949b;
   font-size: 12px;

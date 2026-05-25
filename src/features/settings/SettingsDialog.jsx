@@ -7,7 +7,7 @@ import { Button } from '../../components/Button.jsx';
 import { Modal } from '../../components/Modal.jsx';
 import { NoticeModal } from '../../components/NoticeModal.jsx';
 import { clearAppData } from '../../api.js';
-import { canCheckForUpdates, checkForAppUpdate, installAppUpdate } from '../../lib/updater.js';
+import { canCheckForUpdates, checkForAppUpdate, formatUpdateError, installAppUpdate } from '../../lib/updater.js';
 
 function toSettings(draft) {
   return {
@@ -41,6 +41,7 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
   const [appVersion, setAppVersion] = useState('');
   const [updateStatus, setUpdateStatus] = useState('idle');
   const [updateNotice, setUpdateNotice] = useState(null);
+  const [updateProgress, setUpdateProgress] = useState(null);
   const updateNoticeTimerRef = useRef(null);
 
   const packLocked = busy || clearing;
@@ -84,6 +85,7 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
     setUpdateStatus('checking');
     clearUpdateNoticeTimer();
     setUpdateNotice(null);
+    setUpdateProgress(null);
     try {
       const update = await checkForAppUpdate();
       if (!update) {
@@ -92,16 +94,31 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
         return;
       }
       setUpdateStatus('installing');
-      await installAppUpdate(update);
+      await installAppUpdate(update, (progress) => {
+        setUpdateProgress(progress);
+      });
     } catch (err) {
       setUpdateStatus('idle');
-      setUpdateNotice({ tone: 'error', text: String(err) });
+      setUpdateProgress(null);
+      setUpdateNotice({ tone: 'error', text: formatUpdateError(err) });
     }
   }
 
   const updateBusy = updateStatus === 'checking' || updateStatus === 'installing';
   const updateLabel =
-    updateStatus === 'checking' ? '…' : updateStatus === 'installing' ? 'Загрузка' : 'Обновить';
+    updateStatus === 'checking'
+      ? '…'
+      : updateStatus === 'installing'
+        ? updateProgress?.phase === 'install'
+          ? 'Установка'
+          : 'Загрузка'
+        : 'Обновить';
+
+  function updateProgressLabel() {
+    if (updateProgress?.phase === 'install') return 'Установка…';
+    if (updateProgress?.percent != null) return `Загрузка ${updateProgress.percent}%`;
+    return 'Загрузка…';
+  }
 
   async function pickFolder() {
     const selected = await open({
@@ -246,15 +263,35 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
         ) : null}
 
         {canCheckForUpdates() ? (
-          <div className="settingsUpdateBar">
-            <span
-              className={[
-                'settingsUpdateVersion',
-                updateNotice ? `settingsUpdateVersion--${updateNotice.tone}` : ''
-              ].filter(Boolean).join(' ')}
-            >
-              {updateNotice ? updateNotice.text : (appVersion || '—')}
-            </span>
+          <div className={`settingsUpdateBar${updateStatus === 'installing' ? ' settingsUpdateBar--busy' : ''}`}>
+            <div className="settingsUpdateMain">
+              {updateStatus === 'installing' ? (
+                <>
+                  <span className="settingsUpdateVersion settingsUpdateVersion--progress">
+                    {updateProgressLabel()}
+                  </span>
+                  <div className="settingsUpdateProgressTrack" aria-hidden="true">
+                    <div
+                      className={`settingsUpdateProgressBar${updateProgress?.percent == null ? ' indeterminate' : ''}`}
+                      style={
+                        updateProgress?.percent != null
+                          ? { width: `${updateProgress.percent}%` }
+                          : undefined
+                      }
+                    />
+                  </div>
+                </>
+              ) : (
+                <span
+                  className={[
+                    'settingsUpdateVersion',
+                    updateNotice ? `settingsUpdateVersion--${updateNotice.tone}` : ''
+                  ].filter(Boolean).join(' ')}
+                >
+                  {updateNotice ? updateNotice.text : (appVersion || '—')}
+                </span>
+              )}
+            </div>
             <button
               type="button"
               className="settingsUpdateAction"

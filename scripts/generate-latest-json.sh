@@ -12,13 +12,18 @@ read_signature() {
   tr -d '\n' <"$1"
 }
 
+# GitHub Releases stores assets with spaces replaced by dots in the filename.
+github_release_asset_name() {
+  printf '%s' "$1" | tr ' ' '.'
+}
+
 platforms='{}'
 
 mac_bundle="$(find "$artifacts_dir" -type f -name '*.app.tar.gz' ! -name '*.sig' 2>/dev/null | head -n 1 || true)"
 if [ -n "$mac_bundle" ] && [ -f "${mac_bundle}.sig" ]; then
   mac_name="$(basename "$mac_bundle")"
   mac_sig="$(read_signature "${mac_bundle}.sig")"
-  mac_url="${base_url}/${mac_name}"
+  mac_url="${base_url}/$(github_release_asset_name "$mac_name")"
   platforms="$(jq -n \
     --argjson current "$platforms" \
     --arg url "$mac_url" \
@@ -30,7 +35,7 @@ win_bundle="$(find "$artifacts_dir" -type f -name '*-setup.exe' ! -name '*.sig' 
 if [ -n "$win_bundle" ] && [ -f "${win_bundle}.sig" ]; then
   win_name="$(basename "$win_bundle")"
   win_sig="$(read_signature "${win_bundle}.sig")"
-  win_url="${base_url}/${win_name}"
+  win_url="${base_url}/$(github_release_asset_name "$win_name")"
   platforms="$(jq -n \
     --argjson current "$platforms" \
     --arg url "$win_url" \
