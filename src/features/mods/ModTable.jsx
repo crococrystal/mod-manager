@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { formatDate } from '../../lib/modMeta.jsx';
+import { ModCover } from './ModCover.jsx';
 import { SourceIcon, TagMark } from './ModBadges.jsx';
 
 export function ModTable({ mods, selected, onSelect }) {
@@ -17,6 +18,7 @@ export function ModTable({ mods, selected, onSelect }) {
         <thead>
           <tr>
             <th>Метка</th>
+            <th aria-hidden="true" />
             <th>Название</th>
             <th>Описание</th>
             <th>Дата</th>
@@ -26,18 +28,23 @@ export function ModTable({ mods, selected, onSelect }) {
         <tbody>
           {mods.map((mod) => (
             <tr
-              key={mod.key}
+              key={mod.filename}
               data-filename={mod.filename}
-              className={selected?.key === mod.key ? 'selected' : ''}
+              className={selected?.filename === mod.filename ? 'selected' : ''}
               onClick={() => onSelect(mod)}
             >
               <td><TagMark mod={mod} /></td>
-              <td><strong>{mod.displayName}</strong></td>
+              <td className="coverCell" onClick={(event) => event.stopPropagation()}>
+                <ModCover mod={mod} />
+              </td>
+              <td>
+                <strong>{mod.displayName}</strong>
+              </td>
               <td className="descriptionCell" title={mod.description || undefined}>
-                {mod.description || '-'}
+                {mod.description || '—'}
               </td>
               <td>{formatDate(mod.modifiedAt)}</td>
-              <td><SourceIcon mod={mod} /></td>
+              <td><SourceIcon mod={mod} linked /></td>
             </tr>
           ))}
         </tbody>

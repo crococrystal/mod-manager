@@ -1,0 +1,90 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: dmg
+          - name: macos-x64
+            os: macos-13
+            target: x86_64-apple-darwin
+            bundles: dmg
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Build app
+        run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Collect artifacts (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p out
+          cp -R "src-tauri/target/${{ matrix.target }}/release/bundle/dmg/"*.dmg out/ || true
+
+      - name: Collect artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item "src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe" out/ -ErrorAction SilentlyContinue
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mod-manager-${{ matrix.name }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true

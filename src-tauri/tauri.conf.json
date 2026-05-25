@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "mod-manager",
+  "productName": "Mod Manager",
   "version": "0.1.0",
   "identifier": "app.mod-manager",
   "build": {
@@ -12,26 +12,37 @@
   "app": {
     "windows": [
       {
-        "title": "mod-manager",
+        "title": "Mod Manager",
         "width": 1180,
         "height": 760,
         "minWidth": 980,
-        "minHeight": 620
+        "minHeight": 620,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay"
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$HOME/**", "$APPDATA/**", "$RESOURCE/**"]
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": ["app", "dmg", "nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
   }
 }

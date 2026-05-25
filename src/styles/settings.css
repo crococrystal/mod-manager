@@ -32,6 +32,21 @@
   font-weight: 650;
 }
 
+.settingsToggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #c5cdd2;
+  font-size: 13px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.settingsToggle input {
+  margin-top: 3px;
+  accent-color: #5c9fd6;
+}
+
 .pathField {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

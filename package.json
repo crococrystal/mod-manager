@@ -5,8 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:app": "tauri dev",
     "build": "vite build",
-    "dmg": "tauri build --bundles dmg",
+    "app": "tauri build --bundles app",
+    "app:dmg": "tauri build --bundles dmg",
+    "app:win": "tauri build --bundles nsis",
     "preview": "vite preview",
     "tauri": "tauri"
   },

@@ -14,7 +14,6 @@ export function Modal({ title, subtitle, children, footer, onClose, size = 'defa
       >
         <header className="modalHeader">
           <div>
-            {subtitle ? <p>{subtitle}</p> : null}
             <h2>{title}</h2>
           </div>
           <IconButton icon={X} label="Закрыть" onClick={onClose} />

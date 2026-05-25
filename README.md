@@ -1,4 +1,4 @@
-# mod-manager
+# Mod Manager
 
 Native Tauri app for keeping Minecraft modpack metadata outside jar filenames.
 

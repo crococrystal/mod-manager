@@ -14,25 +14,46 @@ export function TagMark({ mod }) {
   );
 }
 
-export function SourceIcon({ mod }) {
-  const source = sourceIcons[mod.source] ?? sourceIcons.manual;
+export function SourceIcon({ mod, linked = false }) {
+  const item = sourceIcons[mod.source] ?? sourceIcons.manual;
   const needsAttention = mod.duplicate || !mod.hasTags;
+  const label = needsAttention ? `${item.label}: проверить` : item.label;
+  const content = (
+    <>
+      <img src={item.icon} alt="" />
+      {needsAttention ? <AlertTriangle size={13} /> : null}
+    </>
+  );
+
+  if (linked && mod.sourceUrl) {
+    return (
+      <a
+        className="sourceIcon"
+        href={mod.sourceUrl}
+        target="_blank"
+        rel="noreferrer"
+        title={`Открыть ${label}`}
+        aria-label={`Открыть ${label}`}
+      >
+        {content}
+      </a>
+    );
+  }
 
   return (
-    <span className="sourceIcon" title={source.label} aria-label={source.label}>
-      <img src={source.icon} alt="" />
-      {needsAttention ? <AlertTriangle size={13} /> : null}
+    <span className="sourceIcon" title={label} aria-label={label}>
+      {content}
     </span>
   );
 }
 
 export function ModPageLink({ mod }) {
-  const source = sourceIcons[mod.source] ?? sourceIcons.manual;
+  const item = sourceIcons[mod.source] ?? sourceIcons.manual;
 
   if (!mod.sourceUrl) {
     return (
       <div className="modPageLink muted">
-        <img src={source.icon} alt="" />
+        <img src={item.icon} alt="" />
         <span>Сторонний мод</span>
       </div>
     );
@@ -40,8 +61,8 @@ export function ModPageLink({ mod }) {
 
   return (
     <a className="modPageLink" href={mod.sourceUrl} target="_blank" rel="noreferrer">
-      <img src={source.icon} alt="" />
-      <span>Открыть страницу мода</span>
+      <img src={item.icon} alt="" />
+      <span>Открыть страницу</span>
     </a>
   );
 }

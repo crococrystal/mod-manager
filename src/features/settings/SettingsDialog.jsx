@@ -1,12 +1,56 @@
-import { useEffect, useState } from 'react';
-import { FolderOpen, RefreshCw, Save } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Folder, FolderOpen, Info, RefreshCw, Trash2 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { openPath } from '@tauri-apps/plugin-opener';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { Button } from '../../components/Button.jsx';
 import { Modal } from '../../components/Modal.jsx';
+import { clearAppData } from '../../api.js';
 
-export function SettingsDialog({ settings, busy, onClose, onSave, onRescan }) {
+function toSettings(draft) {
+  return {
+    instanceRoot: draft.instanceRoot || null,
+    curseforgeApiKey: draft.curseforgeApiKey ?? '',
+    autoPrefetchCovers: true,
+    autoPrefetchDependencies: true,
+    recentInstances: draft.recentInstances ?? []
+  };
+}
+
+function instanceNameFromPath(path) {
+  if (!path) return '';
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  while (parts.length) {
+    const tail = parts[parts.length - 1].toLowerCase();
+    if (tail === 'mods' || tail === 'minecraft' || tail === '.minecraft') {
+      parts.pop();
+      continue;
+    }
+    break;
+  }
+  return parts[parts.length - 1] || path;
+}
+
+function formatStatus(status) {
+  if (!status) return 'не подготовлена';
+  if (status.ready) return 'кэш готов';
+  const missing = [];
+  if (status.needsCovers) missing.push('обложки');
+  if (status.needsDependencies) missing.push('зависимости');
+  return missing.length ? `нужно: ${missing.join(' и ')}` : 'готово к проверке';
+}
+
+export function SettingsDialog({ settings, busy, onClose, onSave, onRefresh, onCleared }) {
   const [draft, setDraft] = useState(() => settings ?? {});
+  const [message, setMessage] = useState('');
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+
+  const hasPack = Boolean(draft.instanceRoot);
+  const cacheStatus = settings?.cacheStatus;
+  const recent = useMemo(() => {
+    const list = settings?.recentInstances ?? [];
+    return list.filter((item) => item && item !== draft.instanceRoot);
+  }, [settings, draft.instanceRoot]);
 
   useEffect(() => {
     setDraft(settings ?? {});
@@ -16,105 +60,157 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onRescan }) {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: 'Выбери папку Prism-инстанса или папку minecraft/mods'
+      title: 'Выбери папку сборки'
     });
-    if (typeof selected === 'string') {
-      setDraft((current) => ({ ...current, instanceRoot: selected }));
+    if (typeof selected !== 'string') return;
+    const next = { ...draft, instanceRoot: selected };
+    setDraft(next);
+    setMessage('');
+    await onSave(toSettings(next), { bootstrap: true });
+    onClose?.();
+  }
+
+  async function useRecent(path) {
+    const next = { ...draft, instanceRoot: path };
+    setDraft(next);
+    setMessage('');
+    await onSave(toSettings(next), { bootstrap: true });
+    onClose?.();
+  }
+
+  async function refreshNow() {
+    if (!hasPack) {
+      setMessage('Выбери папку сборки.');
+      return;
+    }
+    setMessage('');
+    await onRefresh(toSettings(draft));
+  }
+
+  async function openCurseForgeHelp() {
+    await openUrl('https://console.curseforge.com/?#/api-keys');
+  }
+
+  async function confirmClear() {
+    setClearing(true);
+    setMessage('');
+    try {
+      const result = await clearAppData();
+      const parts = [];
+      if (result?.removedCatalogFiles) parts.push(`файлов: ${result.removedCatalogFiles}`);
+      if (result?.clearedInstances) parts.push(`сборок: ${result.clearedInstances}`);
+      setMessage(parts.length ? `Очищено — ${parts.join(', ')}.` : 'Очищено.');
+      setConfirmingClear(false);
+      await onCleared?.();
+    } catch (err) {
+      setMessage(`Не удалось очистить: ${err}`);
+    } finally {
+      setClearing(false);
     }
   }
 
-  async function openMods() {
-    if (!settings?.modsDir) return;
-    await openPath(settings.modsDir);
-  }
-
-  async function save() {
-    await onSave({
-      instanceRoot: draft.instanceRoot || null,
-      curseforgeApiKey: draft.curseforgeApiKey ?? '',
-      autoPrefetchCovers: draft.autoPrefetchCovers !== false,
-      autoPrefetchDependencies: draft.autoPrefetchDependencies !== false
-    });
-  }
+  const uiBusy = busy || clearing;
 
   return (
     <Modal
       title="Настройки"
-      subtitle="Локальное приложение, данные сборки остаются на твоем диске"
       onClose={onClose}
-      size="wide"
       footer={(
-        <>
-          <Button onClick={onClose}>Закрыть</Button>
-          <Button tone="primary" icon={Save} onClick={save} disabled={busy}>Сохранить</Button>
-        </>
+        <div className="settingsFooter">
+          <Button
+            icon={Trash2}
+            onClick={() => setConfirmingClear(true)}
+            disabled={uiBusy}
+            tone="danger-ghost"
+          >
+            Очистить данные
+          </Button>
+          <Button icon={RefreshCw} onClick={refreshNow} disabled={uiBusy || !hasPack}>
+            Обновить
+          </Button>
+        </div>
       )}
     >
-      <div className="settingsGrid">
-        <section className="settingsSection">
-          <h3>Сборка</h3>
-          <label className="field">
-            <span>Папка инстанса</span>
-            <div className="pathField">
-              <input
-                value={draft.instanceRoot ?? ''}
-                onChange={(event) => setDraft((current) => ({ ...current, instanceRoot: event.target.value }))}
-                placeholder="/Users/.../PrismLauncher/instances/Pack"
-              />
-              <Button icon={FolderOpen} onClick={pickFolder}>Выбрать</Button>
-            </div>
-          </label>
-          <dl className="pathMeta">
-            <div>
-              <dt>mods</dt>
-              <dd>{settings?.modsDir ?? '-'}</dd>
-            </div>
-            <div>
-              <dt>данные mod-manager</dt>
-              <dd>{settings?.dataRoot ?? '-'}</dd>
-            </div>
-          </dl>
-        </section>
-
-        <section className="settingsSection">
-          <h3>Автоматизация</h3>
-          <label className="field">
-            <span>CurseForge API key</span>
-            <input
-              value={draft.curseforgeApiKey ?? ''}
-              onChange={(event) => setDraft((current) => ({ ...current, curseforgeApiKey: event.target.value }))}
-              placeholder="Оставь пустым, если не нужен"
-              type="password"
-            />
-          </label>
-          <label className="checkRow">
-            <input
-              type="checkbox"
-              checked={draft.autoPrefetchCovers !== false}
-              onChange={(event) => setDraft((current) => ({ ...current, autoPrefetchCovers: event.target.checked }))}
-            />
-            <span>Подтягивать обложки при проверке сборки</span>
-          </label>
-          <label className="checkRow">
-            <input
-              type="checkbox"
-              checked={draft.autoPrefetchDependencies !== false}
-              onChange={(event) => setDraft((current) => ({ ...current, autoPrefetchDependencies: event.target.checked }))}
-            />
-            <span>Подтягивать зависимости при проверке сборки</span>
-          </label>
-        </section>
-
-        <section className="settingsSection settingsSectionFull">
-          <h3>Обслуживание</h3>
-          <div className="maintenanceActions">
-            <Button icon={FolderOpen} onClick={openMods} disabled={!settings?.modsDir}>Открыть mods</Button>
-            <Button icon={RefreshCw} onClick={onRescan} disabled={busy}>Проверить сборку</Button>
+      <div className="settingsMinimal">
+        <div className="field">
+          <div className="fieldHeader">
+            <label htmlFor="curseforgeApiKey">CurseForge API key</label>
+            <button
+              className="infoTinyButton"
+              type="button"
+              aria-label="Открыть страницу API keys"
+              onClick={openCurseForgeHelp}
+            >
+              <Info size={15} />
+            </button>
           </div>
-          <p className="mutedText">
-            Кнопки обложек и зависимостей больше не торчат в верхней панели. Их логика будет жить здесь и запускаться как часть проверки сборки.
-          </p>
-        </section>
+          <input
+            id="curseforgeApiKey"
+            value={draft.curseforgeApiKey ?? ''}
+            onChange={(event) => {
+              setMessage('');
+              setDraft((current) => ({ ...current, curseforgeApiKey: event.target.value }));
+            }}
+            onBlur={() => onSave(toSettings(draft), { bootstrap: false, scan: false })}
+            placeholder="Для CurseForge-модов"
+            type="password"
+          />
+        </div>
+
+        <label className="field">
+          <span>Папка сборки</span>
+          <div className="pathField">
+            <input
+              value={draft.instanceRoot ?? ''}
+              readOnly
+              placeholder="/Users/.../PrismLauncher/instances/Pack"
+            />
+            <Button icon={FolderOpen} onClick={pickFolder} disabled={uiBusy}>
+              Выбрать
+            </Button>
+          </div>
+          {hasPack ? (
+            <p className="cacheHint">Статус: {formatStatus(cacheStatus)}.</p>
+          ) : null}
+        </label>
+
+        {recent.length ? (
+          <div className="field">
+            <span className="fieldLabel">Недавние сборки</span>
+            <ul className="recentList">
+              {recent.map((path) => (
+                <li key={path}>
+                  <button
+                    type="button"
+                    className="recentItem"
+                    onClick={() => useRecent(path)}
+                    disabled={uiBusy}
+                    title={path}
+                  >
+                    <Folder size={15} />
+                    <span className="recentName">{instanceNameFromPath(path)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {confirmingClear ? (
+          <div className="dangerConfirm">
+            <p>Удалить все скачанные обложки и зависимости?</p>
+            <div className="dangerActions">
+              <Button onClick={() => setConfirmingClear(false)} disabled={clearing} tone="ghost">
+                Отмена
+              </Button>
+              <Button onClick={confirmClear} disabled={clearing} tone="danger">
+                {clearing ? 'Чистим…' : 'Да, очистить'}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {message ? <p className="settingsMessage">{message}</p> : null}
       </div>
     </Modal>
   );
