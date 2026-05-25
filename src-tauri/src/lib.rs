@@ -27,6 +27,14 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(bootstrap::BootstrapState::new())
         .setup(|app| {
+            #[cfg(target_os = "linux")]
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(false);
+                }
+            }
+
             #[cfg(all(debug_assertions, target_os = "macos"))]
             {
                 let preview = std::env::var("PREVIEW_WINDOWS_CHROME")

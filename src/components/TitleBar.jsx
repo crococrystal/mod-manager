@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 const platform = typeof navigator !== 'undefined' ? navigator.platform : '';
 const isMac = /Mac|iPhone|iPod|iPad/i.test(platform);
 const isWindows = /Win/i.test(platform);
+const isLinux = /Linux/i.test(platform);
 
 function isPreviewWindowsChrome() {
   if (!import.meta.env.DEV) return false;
@@ -13,9 +14,9 @@ function isPreviewWindowsChrome() {
 }
 
 const previewWindowsChrome = isPreviewWindowsChrome();
-const useWindowsChrome = isWindows || previewWindowsChrome;
+const useCustomChrome = isWindows || isLinux || previewWindowsChrome;
 
-async function applyWindowsChrome() {
+async function applyCustomChrome() {
   const win = getCurrentWindow();
   if (previewWindowsChrome && isMac) {
     await win.setTitleBarStyle('visible').catch(() => {});
@@ -23,7 +24,7 @@ async function applyWindowsChrome() {
   await win.setDecorations(false).catch(() => {});
 }
 
-function WindowsControls() {
+function WindowControls() {
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -74,15 +75,11 @@ function WindowsControls() {
 
 export function TitleBar({ children }) {
   useEffect(() => {
-    if (!useWindowsChrome) return;
-    void applyWindowsChrome();
+    if (!useCustomChrome) return;
+    void applyCustomChrome();
   }, []);
 
-  const titleBarClass = useWindowsChrome
-    ? 'titleBarWindows'
-    : isMac
-      ? 'titleBarMac'
-      : 'titleBarOther';
+  const titleBarClass = useCustomChrome ? 'titleBarWindows' : isMac ? 'titleBarMac' : 'titleBarOther';
 
   return (
     <header className={`titleBar ${titleBarClass}`} data-tauri-drag-region>
@@ -90,7 +87,7 @@ export function TitleBar({ children }) {
       <div className="titleBarContent" data-tauri-drag-region>
         {children}
       </div>
-      {useWindowsChrome ? <WindowsControls /> : null}
+      {useCustomChrome ? <WindowControls /> : null}
     </header>
   );
 }
