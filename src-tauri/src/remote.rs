@@ -4,6 +4,18 @@ use crate::mods::ModEntry;
 use crate::settings::Settings;
 
 #[derive(Clone, Debug)]
+pub(crate) struct ModrinthVersionMatch {
+    pub project_id: String,
+    pub version_id: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CurseForgeFileMatch {
+    pub project_id: String,
+    pub file_id: String,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct ProviderProject {
     pub id: String,
     pub slug: Option<String>,
@@ -145,6 +157,55 @@ pub(crate) fn modrinth_version(
         .ok()
 }
 
+pub(crate) fn modrinth_versions_by_sha512(
+    client: &reqwest::blocking::Client,
+    hashes: &[String],
+) -> HashMap<String, ModrinthVersionMatch> {
+    if hashes.is_empty() {
+        return HashMap::new();
+    }
+    let Ok(payload) = client
+        .post("https://api.modrinth.com/v2/version_files")
+        .json(&serde_json::json!({
+            "hashes": hashes,
+            "algorithm": "sha512"
+        }))
+        .send()
+        .and_then(|response| response.error_for_status())
+        .and_then(|response| response.json::<serde_json::Value>())
+    else {
+        return HashMap::new();
+    };
+
+    let Some(items) = payload.as_object() else {
+        return HashMap::new();
+    };
+    items
+        .iter()
+        .filter_map(|(hash, version)| {
+            let project_id = version.get("project_id").and_then(|value| value.as_str())?;
+            let version_id = version.get("id").and_then(|value| value.as_str())?;
+            Some((
+                hash.clone(),
+                ModrinthVersionMatch {
+                    project_id: project_id.to_string(),
+                    version_id: version_id.to_string(),
+                },
+            ))
+        })
+        .collect()
+}
+
+pub(crate) fn modrinth_version_by_sha512(
+    client: &reqwest::blocking::Client,
+    hash: &str,
+) -> Option<ModrinthVersionMatch> {
+    let hashes = vec![hash.to_string()];
+    modrinth_versions_by_sha512(client, &hashes)
+        .into_values()
+        .next()
+}
+
 pub(crate) fn curseforge_get(
     client: &reqwest::blocking::Client,
     api_key: &str,
@@ -162,6 +223,85 @@ pub(crate) fn curseforge_get(
         .ok()?
         .json()
         .ok()
+}
+
+pub(crate) fn curseforge_mod_info(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    project_id: &str,
+) -> Option<ProviderProject> {
+    let payload = curseforge_get(client, api_key, &format!("mods/{project_id}"))?;
+    let data = payload.get("data")?;
+    let id = data.get("id").and_then(|value| value.as_i64())?;
+    Some(ProviderProject {
+        id: id.to_string(),
+        slug: data
+            .get("slug")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        title: data
+            .get("name")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        project_type: None,
+    })
+}
+
+pub(crate) fn curseforge_fingerprint_matches(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    fingerprints: &[u32],
+) -> HashMap<u32, CurseForgeFileMatch> {
+    if fingerprints.is_empty() || api_key.trim().is_empty() {
+        return HashMap::new();
+    }
+    let Ok(payload) = client
+        .post("https://api.curseforge.com/v1/fingerprints/432")
+        .header("x-api-key", api_key.trim())
+        .json(&serde_json::json!({ "fingerprints": fingerprints }))
+        .send()
+        .and_then(|response| response.error_for_status())
+        .and_then(|response| response.json::<serde_json::Value>())
+    else {
+        return HashMap::new();
+    };
+
+    let matches = payload
+        .get("data")
+        .and_then(|data| data.get("exactMatches"))
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    matches
+        .into_iter()
+        .filter_map(|item| {
+            let fingerprint = item
+                .get("id")
+                .and_then(|value| value.as_u64())
+                .and_then(|value| u32::try_from(value).ok())?;
+            let file = item.get("file")?;
+            let project_id = file.get("modId").and_then(|value| value.as_i64())?;
+            let file_id = file.get("id").and_then(|value| value.as_i64())?;
+            Some((
+                fingerprint,
+                CurseForgeFileMatch {
+                    project_id: project_id.to_string(),
+                    file_id: file_id.to_string(),
+                },
+            ))
+        })
+        .collect()
+}
+
+pub(crate) fn curseforge_fingerprint_match(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    fingerprint: u32,
+) -> Option<CurseForgeFileMatch> {
+    curseforge_fingerprint_matches(client, api_key, &[fingerprint])
+        .into_values()
+        .next()
 }
 
 fn non_empty_json_string(value: Option<&serde_json::Value>) -> Option<String> {

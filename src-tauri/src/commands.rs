@@ -4,13 +4,15 @@ use tauri::AppHandle;
 
 use crate::catalog;
 use crate::covers::{cover_ext_from_mime, delete_manual_cover, store_uploaded_cover};
+use crate::file_identity::read_file_identity;
 use crate::instance_registry;
 use crate::mods::{normalize_side, scan_mods_for_settings, stats_for, ModListPayload};
 use crate::mods_watch;
 use crate::prefetch::prefetch_mod_assets_for_settings;
 use crate::remote::{
-    curseforge_search_mod, http_client, modrinth_project_info, modrinth_project_matches,
-    modrinth_search_project,
+    curseforge_fingerprint_match, curseforge_mod_info, curseforge_search_mod, http_client,
+    modrinth_project_info, modrinth_project_matches, modrinth_search_project,
+    modrinth_version_by_sha512,
 };
 use crate::settings::{
     read_settings, remember_instance, resolve_paths, settings_view, write_settings, Settings,
@@ -211,6 +213,7 @@ pub(crate) async fn switch_mod_source(
             .find(|item| item.key == request.key)
             .ok_or_else(|| "Мод не найден в текущей сборке.".to_string())?;
         let display_name = selected.display_name.clone();
+        let filename = selected.filename.clone();
         let has_modrinth = selected.modrinth_id.is_some();
         let has_curseforge = selected.curseforge_id.is_some();
 
@@ -231,6 +234,14 @@ pub(crate) async fn switch_mod_source(
                     }
                 }
                 if (!has_modrinth || invalid_saved_modrinth) && tag.modrinth_id.trim().is_empty() {
+                    if let Ok(identity) = read_file_identity(&paths.mods_dir.join(&filename)) {
+                        if let Some(found) = modrinth_version_by_sha512(&client, &identity.sha512) {
+                            tag.modrinth_id = found.project_id;
+                            tag.modrinth_version_id = found.version_id;
+                        }
+                    }
+                }
+                if (!has_modrinth || invalid_saved_modrinth) && tag.modrinth_id.trim().is_empty() {
                     if let Some(project) = modrinth_search_project(&client, &display_name) {
                         tag.modrinth_id = project.id;
                     } else {
@@ -247,6 +258,26 @@ pub(crate) async fn switch_mod_source(
                     if settings.curseforge_api_key.trim().is_empty() {
                         return Err("Для поиска на CurseForge нужен API key.".to_string());
                     }
+                    if let Ok(identity) = read_file_identity(&paths.mods_dir.join(&filename)) {
+                        if let Some(found) = curseforge_fingerprint_match(
+                            &client,
+                            &settings.curseforge_api_key,
+                            identity.curseforge_fingerprint,
+                        ) {
+                            let slug = curseforge_mod_info(
+                                &client,
+                                &settings.curseforge_api_key,
+                                &found.project_id,
+                            )
+                            .and_then(|project| project.slug)
+                            .unwrap_or_default();
+                            tag.curseforge_id = found.project_id;
+                            tag.curseforge_file_id = found.file_id;
+                            tag.curseforge_slug = slug;
+                        }
+                    }
+                }
+                if !has_curseforge && tag.curseforge_id.trim().is_empty() {
                     let project =
                         curseforge_search_mod(&client, &settings.curseforge_api_key, &display_name)
                             .ok_or_else(|| "Мод не найден на CurseForge.".to_string())?;

@@ -3,6 +3,7 @@ mod commands;
 mod covers;
 mod dependencies;
 mod events;
+mod file_identity;
 mod instance_registry;
 mod jar_deps;
 mod mods;

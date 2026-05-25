@@ -234,6 +234,11 @@ function App() {
           do {
             watcherReloadPendingRef.current = false;
             await reload({ silent: true });
+            const next = await getSettings();
+            setSettings(next);
+            if (needsBootstrap(next.cacheStatus)) {
+              void runBootstrap(next.cacheStatus);
+            }
           } while (watcherReloadPendingRef.current && !bootstrapping);
         } finally {
           watcherReloadingRef.current = false;
@@ -241,7 +246,7 @@ function App() {
       });
     })();
     return () => unlistenMods?.();
-  }, [reload, bootstrapping]);
+  }, [reload, runBootstrap, bootstrapping]);
 
   useEffect(() => {
     let unlistenProgress;

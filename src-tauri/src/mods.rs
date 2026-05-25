@@ -304,14 +304,22 @@ pub(crate) fn scan_mods_for_settings(
 
         let tag = tags.mods.get(&key).cloned().unwrap_or_default();
         let tag_modrinth_id = clean_tag_value(&tag.modrinth_id);
+        let tag_modrinth_version_id = clean_tag_value(&tag.modrinth_version_id);
         let tag_curseforge_id = clean_tag_value(&tag.curseforge_id);
+        let tag_curseforge_file_id = clean_tag_value(&tag.curseforge_file_id);
         let tag_curseforge_slug = clean_tag_value(&tag.curseforge_slug);
         let modrinth_id = tag_modrinth_id
             .clone()
             .or_else(|| info.and_then(|info| info.modrinth_id.clone()));
+        let modrinth_version_id = tag_modrinth_version_id
+            .clone()
+            .or_else(|| info.and_then(|info| info.modrinth_version_id.clone()));
         let curseforge_id = tag_curseforge_id
             .clone()
             .or_else(|| info.and_then(|info| info.curseforge_id.clone()));
+        let curseforge_file_id = tag_curseforge_file_id
+            .clone()
+            .or_else(|| info.and_then(|info| info.curseforge_file_id.clone()));
         let curseforge_slug = tag_curseforge_slug
             .clone()
             .or_else(|| info.map(|info| info.slug.clone()));
@@ -354,9 +362,9 @@ pub(crate) fn scan_mods_for_settings(
             index_file: info.map(|info| info.index_file.clone()),
             pack_side: info.and_then(|info| info.side.clone()),
             modrinth_id,
-            modrinth_version_id: info.and_then(|info| info.modrinth_version_id.clone()),
+            modrinth_version_id,
             curseforge_id,
-            curseforge_file_id: info.and_then(|info| info.curseforge_file_id.clone()),
+            curseforge_file_id,
             duplicate: base_counts.get(&filename).copied().unwrap_or_default() > 1,
             modified_at: metadata
                 .modified()
@@ -385,7 +393,10 @@ pub(crate) fn stats_for(mods: &[ModEntry]) -> ModStats {
         client: mods.iter().filter(|item| item.side == "client").count(),
         universal: mods.iter().filter(|item| item.side == "universal").count(),
         server: mods.iter().filter(|item| item.side == "server").count(),
-        no_index: mods.iter().filter(|item| !item.has_index).count(),
+        no_index: mods
+            .iter()
+            .filter(|item| item.source == "manual" || item.source == "index")
+            .count(),
         tagged: mods.iter().filter(|item| item.has_tags).count(),
     }
 }

@@ -9,11 +9,101 @@ use crate::events::{
     emit_cover_ready, emit_dependencies_ready, emit_prefetch_done, emit_prefetch_progress,
     PrefetchReport,
 };
+use crate::file_identity::read_file_identity;
 use crate::mods::{merge_keys, scan_mods_for_settings};
-use crate::remote::{fetch_api_dependencies, http_client, resolve_cover_url};
+use crate::remote::{
+    curseforge_fingerprint_matches, curseforge_mod_info, fetch_api_dependencies, http_client,
+    modrinth_versions_by_sha512, resolve_cover_url,
+};
 use crate::settings::{resolve_paths, Settings};
 use crate::tags::{read_tags, write_tags};
 use crate::util::{file_mtime_millis, now_iso, path_string};
+
+struct PendingIdentity {
+    key: String,
+    filename: String,
+    sha512: String,
+    curseforge_fingerprint: u32,
+}
+
+fn identify_unknown_sources(
+    settings: &Settings,
+    client: &reqwest::blocking::Client,
+    paths: &crate::settings::InstancePaths,
+    tags: &mut crate::tags::TagFile,
+    mods: &[crate::mods::ModEntry],
+) -> Result<bool, String> {
+    let mut pending = Vec::new();
+    for item in mods {
+        if item.modrinth_id.is_some() || item.curseforge_id.is_some() {
+            continue;
+        }
+        let identity = read_file_identity(&paths.mods_dir.join(&item.filename))?;
+        pending.push(PendingIdentity {
+            key: item.key.clone(),
+            filename: item.filename.clone(),
+            sha512: identity.sha512,
+            curseforge_fingerprint: identity.curseforge_fingerprint,
+        });
+    }
+
+    if pending.is_empty() {
+        return Ok(false);
+    }
+
+    let mut changed = false;
+    let sha512_hashes: Vec<String> = pending.iter().map(|item| item.sha512.clone()).collect();
+    let modrinth_matches = modrinth_versions_by_sha512(client, &sha512_hashes);
+    let mut unmatched_curseforge = Vec::new();
+
+    for item in &pending {
+        if let Some(found) = modrinth_matches.get(&item.sha512) {
+            let tag = tags.mods.entry(item.key.clone()).or_default();
+            tag.source = "modrinth".to_string();
+            tag.modrinth_id = found.project_id.clone();
+            tag.modrinth_version_id = found.version_id.clone();
+            if !tag.aliases.contains(&item.filename) {
+                tag.aliases.push(item.filename.clone());
+            }
+            tag.updated_at = now_iso();
+            tags.updated_at = now_iso();
+            changed = true;
+        } else {
+            unmatched_curseforge.push(item);
+        }
+    }
+
+    if !settings.curseforge_api_key.trim().is_empty() && !unmatched_curseforge.is_empty() {
+        let fingerprints: Vec<u32> = unmatched_curseforge
+            .iter()
+            .map(|item| item.curseforge_fingerprint)
+            .collect();
+        let curseforge_matches =
+            curseforge_fingerprint_matches(client, &settings.curseforge_api_key, &fingerprints);
+
+        for item in unmatched_curseforge {
+            let Some(found) = curseforge_matches.get(&item.curseforge_fingerprint) else {
+                continue;
+            };
+            let slug = curseforge_mod_info(client, &settings.curseforge_api_key, &found.project_id)
+                .and_then(|project| project.slug)
+                .unwrap_or_default();
+            let tag = tags.mods.entry(item.key.clone()).or_default();
+            tag.source = "curseforge".to_string();
+            tag.curseforge_id = found.project_id.clone();
+            tag.curseforge_file_id = found.file_id.clone();
+            tag.curseforge_slug = slug;
+            if !tag.aliases.contains(&item.filename) {
+                tag.aliases.push(item.filename.clone());
+            }
+            tag.updated_at = now_iso();
+            tags.updated_at = now_iso();
+            changed = true;
+        }
+    }
+
+    Ok(changed)
+}
 
 pub(crate) fn prefetch_mod_assets_for_settings(
     settings: &Settings,
@@ -27,6 +117,12 @@ pub(crate) fn prefetch_mod_assets_for_settings(
     let Some(client) = http_client() else {
         return Err("Не удалось создать HTTP-клиент.".to_string());
     };
+
+    let mut tags = read_tags(&paths.tags_path)?;
+    if identify_unknown_sources(settings, &client, &paths, &mut tags, &mods)? {
+        write_tags(&paths.tags_path, &tags)?;
+        mods = scan_mods_for_settings(settings, catalog_root.clone())?;
+    }
 
     let modrinth_lookup: HashMap<String, String> = mods
         .iter()
@@ -45,7 +141,6 @@ pub(crate) fn prefetch_mod_assets_for_settings(
         })
         .collect();
 
-    let mut tags = read_tags(&paths.tags_path)?;
     let mut report = PrefetchReport::new();
     let has_cf_key = !settings.curseforge_api_key.trim().is_empty();
     let total = mods.len() as u32;
