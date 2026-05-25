@@ -112,7 +112,7 @@ main {
 }
 
 .titleBarMac .titleBarSpacer {
-  width: 78px;
+  width: 84px;
 }
 
 .titleBarWindows .titleBarSpacer {
@@ -544,8 +544,8 @@ h1 {
 .settingsToggleRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: 10px;
   min-height: 40px;
   padding: 0 12px;
   border: 1px solid var(--line);
@@ -556,12 +556,47 @@ h1 {
   cursor: pointer;
 }
 
-.settingsToggleRow input {
+.settingsToggleRow input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  flex: 0 0 16px;
   width: 16px;
   height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  max-width: 16px;
+  max-height: 16px;
   margin: 0;
-  accent-color: #5c9fd6;
+  padding: 0;
+  border: 1px solid #4a5a62;
+  border-radius: 4px;
+  background: #0e1417;
   cursor: pointer;
+  position: relative;
+  align-self: center;
+}
+
+.settingsToggleRow input[type='checkbox']:checked {
+  border-color: #5c9fd6;
+  background: #5c9fd6;
+}
+
+.settingsToggleRow input[type='checkbox']:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.settingsToggleRow input[type='checkbox']:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 @keyframes noticeToastIn {
@@ -2113,7 +2148,7 @@ dd {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.settingsMinimal input,
+.settingsMinimal input:not([type='checkbox']),
 .searchInput {
   width: 100%;
   min-width: 0;

@@ -84,13 +84,13 @@ export function useAppUpdater() {
     }
   }, [clearNoticeTimer, rememberUpdate, showUpToDateNotice]);
 
-  const install = useCallback(async () => {
+  const install = useCallback(async ({ suppressModal = false } = {}) => {
     const update = updateRef.current;
     if (!update) return;
     setStatus('installing');
     setError('');
     setProgress(null);
-    setModalDismissed(false);
+    if (!suppressModal) setModalDismissed(false);
     try {
       await installAppUpdate(update, setProgress);
     } catch (err) {
@@ -106,13 +106,15 @@ export function useAppUpdater() {
   }, [status]);
 
   const checkAndInstall = useCallback(
-    async ({ silent = false } = {}) => {
+    async ({ silent = false, fromSettings = false } = {}) => {
       if (!updateRef.current) {
         const result = await check({ silent });
+        if (fromSettings) setModalDismissed(true);
         if (result?.upToDate || result?.error || result?.skipped) return result;
       }
+      if (fromSettings) setModalDismissed(true);
       if (!updateRef.current) return { skipped: true };
-      await install();
+      await install({ suppressModal: fromSettings });
       return { upToDate: false };
     },
     [check, install]

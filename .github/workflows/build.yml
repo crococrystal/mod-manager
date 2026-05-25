@@ -1,10 +1,11 @@
 name: Build
 
 on:
-  push:
-    branches: [main]
-    tags: ['v*']
   workflow_dispatch:
+  # Автосборка на push временно отключена — собирай локально или запускай workflow вручную.
+  # push:
+  #   branches: [main]
+  #   tags: ['v*']
 
 env:
   RELEASES_REPO: crococrystal/mod-manager-releases
@@ -34,6 +35,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
     steps:
       - uses: actions/checkout@v4
 
@@ -123,9 +125,7 @@ jobs:
             exit 1
           fi
 
-          notes="Built from crococrystal/mod-manager@${SOURCE_SHA}.
-
-https://github.com/${RELEASES_REPO}/releases/latest"
+          notes="Built from crococrystal/mod-manager@${SOURCE_SHA}. Download: https://github.com/${RELEASES_REPO}/releases/latest"
 
           if gh release view latest --repo "${RELEASES_REPO}" >/dev/null 2>&1; then
             gh release edit latest \

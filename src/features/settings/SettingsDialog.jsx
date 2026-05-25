@@ -63,17 +63,11 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared, upd
 
   async function handleManualUpdate() {
     if (!updater) return;
-    await updater.checkAndInstall({ silent: false });
+    await updater.checkAndInstall({ silent: false, fromSettings: true });
   }
 
   const updateLabel =
-    updateStatus === 'checking'
-      ? '…'
-      : updateStatus === 'installing'
-        ? updateProgress?.phase === 'install'
-          ? 'Установка'
-          : 'Загрузка'
-        : 'Обновить';
+    updateStatus === 'checking' || updateStatus === 'installing' ? '…' : 'Обновить';
 
   async function pickFolder() {
     const selected = await open({
@@ -227,13 +221,13 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared, upd
         {canCheckForUpdates() ? (
           <>
             <label className="settingsToggleRow">
-              <span>Автообновление</span>
               <input
                 type="checkbox"
                 checked={draft.autoCheckUpdates ?? true}
                 disabled={packLocked}
                 onChange={(event) => saveAutoCheckUpdates(event.target.checked)}
               />
+              <span>Автообновление приложения</span>
             </label>
 
             <div className={`settingsUpdateBar${updateStatus === 'installing' ? ' settingsUpdateBar--busy' : ''}`}>

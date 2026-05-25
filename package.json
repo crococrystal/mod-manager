@@ -1,14 +1,17 @@
 {
   "name": "mod-manager",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.3.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "dev:app": "tauri dev",
     "build": "vite build",
-    "app": "tauri build --bundles app",
-    "app:dmg": "tauri build --bundles dmg",
+    "app": "bash -c 'set -a && [ -f .env ] && . ./.env && set +a && npx tauri build --bundles app'",
+    "app:dmg": "bash -c 'set -a && [ -f .env ] && . ./.env && set +a && export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-} && export CARGO_TARGET_DIR=$PWD/src-tauri/target && npx tauri build --bundles app,dmg'",
+    "release:macos": "bash scripts/publish-local-macos-release.sh",
+    "release:macos:fast": "SKIP_NPM_CI=1 bash scripts/publish-local-macos-release.sh",
+    "release:macos:upload": "SKIP_BUILD=1 bash scripts/publish-local-macos-release.sh",
     "app:win": "tauri build --bundles nsis",
     "preview": "vite preview",
     "tauri": "tauri"

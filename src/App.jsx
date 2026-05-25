@@ -843,7 +843,7 @@ function App() {
         />
       ) : null}
 
-      {updater.showUpdateModal ? (
+      {updater.showUpdateModal && !settingsOpen ? (
         <UpdateModal
           currentVersion={updater.pendingUpdate?.currentVersion ?? updater.appVersion}
           version={updater.pendingUpdate?.version}
