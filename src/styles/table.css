@@ -1,0 +1,116 @@
+.tableWrap {
+  min-width: 0;
+  overflow: auto;
+}
+
+.tableWrap table,
+.tableWrap table * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: #a7b0b6;
+  font-size: 12px;
+  font-weight: 650;
+  text-align: left;
+}
+
+td {
+  height: 42px;
+  padding: 0 12px;
+  border-bottom: 1px solid #293035;
+  color: #d9dddf;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+tbody tr {
+  background: #181d20;
+}
+
+tbody tr:nth-child(even) {
+  background: #202629;
+}
+
+tbody tr:hover,
+tbody tr.selected {
+  background: #2a3b3c;
+}
+
+th:nth-child(1),
+td:nth-child(1) {
+  width: 86px;
+}
+
+th:nth-child(2),
+td:nth-child(2) {
+  width: 30%;
+}
+
+th:nth-child(4),
+td:nth-child(4) {
+  width: 172px;
+}
+
+th:nth-child(5),
+td:nth-child(5) {
+  width: 82px;
+}
+
+td strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.descriptionCell {
+  color: #b0b8bd;
+}
+
+.tagMark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sourceIcon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.sourceIcon img {
+  display: block;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.sourceIcon svg {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  padding: 1px;
+  border-radius: 999px;
+  background: #473321;
+  color: #f3c07c;
+}

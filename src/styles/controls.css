@@ -1,0 +1,115 @@
+.button,
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: #273034;
+  color: #dce2e4;
+}
+
+.button {
+  min-height: 36px;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.button:hover,
+.iconButton:hover {
+  background: #354147;
+}
+
+.button-primary {
+  background: #2d4a43;
+}
+
+.button-primary:hover {
+  background: #386357;
+}
+
+.iconButton {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  width: 410px;
+  height: 36px;
+  gap: 8px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.search input,
+.searchInput,
+.field input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.search input {
+  border: 0;
+  background: transparent;
+}
+
+.searchInput,
+.field input {
+  height: 38px;
+  padding: 0 10px;
+}
+
+.searchInput:focus,
+.field input:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+.segments {
+  display: flex;
+  gap: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.segments button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 82px;
+  height: 34px;
+  gap: 7px;
+  padding: 0 12px;
+  background: var(--panel-soft);
+  color: #b6bec3;
+}
+
+.segments button.active,
+.segments button:hover {
+  background: #3d5553;
+  color: #f5fbfa;
+}
+
+textarea {
+  width: 100%;
+  min-height: 86px;
+  resize: vertical;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  outline: 0;
+  padding: 9px 10px;
+  background: var(--surface);
+  color: var(--text);
+  line-height: 1.35;
+}

@@ -1,0 +1,108 @@
+.relations {
+  display: grid;
+  gap: 16px;
+}
+
+.relationBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.relationBlock header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #a7b0b6;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.relationBlock header strong {
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #243038;
+  color: #9eb0b8;
+  font-size: 11px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.relationList {
+  display: grid;
+  gap: 4px;
+}
+
+.relationRow {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 36px;
+  align-items: center;
+  min-height: 40px;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #1d2427;
+}
+
+.relationRow:has(.iconButton:only-child) {
+  grid-template-columns: 64px minmax(0, 1fr) 36px;
+}
+
+.relationRow > button:not(.iconButton) {
+  min-width: 0;
+  overflow: hidden;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relationRow > button:not(.iconButton):hover {
+  color: var(--accent);
+}
+
+.relationRow.missing {
+  border-color: #5c3430;
+}
+
+.missingMark {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: #332020;
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.pickerList {
+  display: grid;
+  gap: 3px;
+  margin-top: 12px;
+}
+
+.pickerList button {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  align-items: center;
+  min-height: 42px;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+}
+
+.pickerList button:hover {
+  background: #273034;
+}
+
+.pickerList button span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
