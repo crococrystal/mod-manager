@@ -163,6 +163,7 @@ pub(crate) fn prefetch_mod_assets_for_settings(
                         item.modrinth_id.as_deref(),
                         item.curseforge_id.as_deref(),
                         &url,
+                        false,
                     ) {
                         let mtime = file_mtime_millis(&path);
                         let stored = path_string(path);

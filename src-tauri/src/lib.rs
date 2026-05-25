@@ -4,11 +4,14 @@ mod covers;
 mod dependencies;
 mod events;
 mod file_identity;
+mod instance_meta;
 mod instance_registry;
 mod jar_deps;
+mod mod_names;
 mod mods;
 mod mods_watch;
 mod prefetch;
+mod providers;
 mod remote;
 mod settings;
 mod tags;
@@ -35,7 +38,11 @@ pub fn run() {
             commands::bootstrap_instance,
             commands::clear_app_data,
             commands::update_mod_tags,
+            commands::search_provider_candidates,
+            commands::lookup_provider_fingerprint,
             commands::switch_mod_source,
+            commands::list_provider_versions,
+            commands::install_provider_version,
             commands::copy_mod_files,
             commands::upload_cover,
             commands::delete_custom_cover

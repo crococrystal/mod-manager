@@ -17,9 +17,22 @@ pub(crate) fn apply_jar_dependencies(
         })
         .collect();
     let cache_path = paths.data_root.join("cache").join("jar-dependencies.json");
-    let map = jar_deps::jar_deps_for_mods(&paths.mods_dir, &cache_path, &refs)?;
+    let map = jar_deps::jar_info_for_mods(&paths.mods_dir, &cache_path, &refs)?;
     for item in mods.iter_mut() {
-        item.jar_dependencies = map.get(&item.key).cloned().unwrap_or_default();
+        if let Some(info) = map.get(&item.key) {
+            if !item.display_name_locked {
+                if let Some(display_name) = info.display_name.as_ref() {
+                    item.display_name = display_name.clone();
+                    item.display_name_locked = true;
+                }
+            }
+            if let Some(version) = info.version.as_ref() {
+                item.installed_version = Some(version.clone());
+            }
+            item.jar_dependencies = info.dependency_keys.clone();
+        } else {
+            item.jar_dependencies = Vec::new();
+        }
         item.resolved_dependencies = merge_keys(&[&item.dependencies, &item.jar_dependencies]);
     }
     Ok(())

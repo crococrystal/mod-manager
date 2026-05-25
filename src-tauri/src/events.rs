@@ -92,6 +92,51 @@ pub(crate) fn emit_cover_ready(
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ModSourceReadyPayload {
+    key: String,
+    source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modrinth_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modrinth_version_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    curseforge_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    curseforge_file_id: Option<String>,
+}
+
+pub(crate) fn emit_mod_source_ready(
+    app: &AppHandle,
+    key: &str,
+    source: &str,
+    display_name: Option<String>,
+    source_url: Option<String>,
+    modrinth_id: Option<String>,
+    modrinth_version_id: Option<String>,
+    curseforge_id: Option<String>,
+    curseforge_file_id: Option<String>,
+) {
+    let _ = app.emit(
+        "mod-source-ready",
+        ModSourceReadyPayload {
+            key: key.to_string(),
+            source: source.to_string(),
+            display_name,
+            source_url,
+            modrinth_id,
+            modrinth_version_id,
+            curseforge_id,
+            curseforge_file_id,
+        },
+    );
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DependenciesReadyPayload {
     key: String,
     dependencies: Vec<String>,

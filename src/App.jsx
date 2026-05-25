@@ -9,20 +9,25 @@ import {
   getSettings,
   saveSettings,
   scanMods,
-  switchModSource,
   updateModTags,
   uploadCover
 } from './api.js';
 import { IconButton } from './components/Button.jsx';
 import { TitleBar } from './components/TitleBar.jsx';
 import { NoticeModal } from './components/NoticeModal.jsx';
+import { DescriptionDialog } from './features/mods/DescriptionDialog.jsx';
 import { ModEditor } from './features/mods/ModEditor.jsx';
 import { ModTable } from './features/mods/ModTable.jsx';
 import { ProviderDialog } from './features/mods/ProviderDialog.jsx';
+import { TagsDialog } from './features/mods/TagsDialog.jsx';
+import { VersionDialog } from './features/mods/VersionDialog.jsx';
 import { SettingsDialog } from './features/settings/SettingsDialog.jsx';
 import { filters } from './lib/modMeta.jsx';
 import { normalizeModsGraph } from './lib/usedBy.js';
 import './styles/index.css';
+
+const EMPTY_MODS = [];
+const EMPTY_STATS = {};
 
 function needsBootstrap(cacheStatus, { force = false } = {}) {
   if (force) return true;
@@ -36,6 +41,17 @@ function coverUrlFor(mod) {
   return mod.coverModifiedAt ? `${base}?v=${mod.coverModifiedAt}` : base;
 }
 
+function statsForMods(mods) {
+  return {
+    total: mods.length,
+    client: mods.filter((mod) => mod.side === 'client').length,
+    universal: mods.filter((mod) => mod.side === 'universal').length,
+    server: mods.filter((mod) => mod.side === 'server').length,
+    noIndex: mods.filter((mod) => mod.source === 'manual' || mod.source === 'index').length,
+    tagged: mods.filter((mod) => mod.hasTags).length
+  };
+}
+
 function withLocalCovers(next) {
   const mods = (next.mods ?? []).map((mod) => ({
     ...mod,
@@ -43,6 +59,89 @@ function withLocalCovers(next) {
   }));
   normalizeModsGraph(mods);
   return { ...next, mods };
+}
+
+function isTextEntryTarget(target) {
+  return (
+    target instanceof HTMLElement &&
+    Boolean(target.closest('input, textarea, select, [contenteditable="true"]'))
+  );
+}
+
+function hasActiveTextSelection() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    return false;
+  }
+  return selection.toString().length > 0;
+}
+
+function hasTauriRuntime() {
+  return typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__);
+}
+
+async function listenEvent(name, handler) {
+  if (!hasTauriRuntime()) {
+    return () => {};
+  }
+  return listen(name, handler);
+}
+
+const SORT_DEFAULT_DIRECTION = {
+  tag: 'asc',
+  name: 'asc',
+  description: 'asc',
+  version: 'desc',
+  date: 'desc',
+  source: 'asc'
+};
+
+function tagSortValue(mod) {
+  return [
+    mod.side ?? '',
+    mod.library ? 'library' : '',
+    mod.technical ? 'technical' : ''
+  ].join(' ');
+}
+
+function sortValue(mod, key) {
+  switch (key) {
+    case 'tag':
+      return tagSortValue(mod);
+    case 'name':
+      return mod.displayName ?? '';
+    case 'description':
+      return mod.description ?? '';
+    case 'version':
+      return mod.installedVersion ?? '';
+    case 'date':
+      return new Date(mod.modifiedAt ?? 0).getTime() || 0;
+    case 'source':
+      return mod.source ?? '';
+    default:
+      return mod.displayName ?? '';
+  }
+}
+
+function sortMods(mods, sort) {
+  const direction = sort?.direction === 'desc' ? -1 : 1;
+  return mods
+    .map((mod, index) => ({ mod, index }))
+    .sort((left, right) => {
+      const leftValue = sortValue(left.mod, sort?.key);
+      const rightValue = sortValue(right.mod, sort?.key);
+      let result;
+      if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+        result = leftValue - rightValue;
+      } else {
+        result = String(leftValue).localeCompare(String(rightValue), 'ru', {
+          numeric: true,
+          sensitivity: 'base'
+        });
+      }
+      return result === 0 ? left.index - right.index : result * direction;
+    })
+    .map((item) => item.mod);
 }
 
 function Stat({ label, value = 0, tone }) {
@@ -68,15 +167,19 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [progress, setProgress] = useState(null);
   const [providerKey, setProviderKey] = useState(null);
+  const [versionKey, setVersionKey] = useState(null);
+  const [tagsKey, setTagsKey] = useState(null);
+  const [descriptionKey, setDescriptionKey] = useState(null);
+  const [sort, setSort] = useState({ key: 'name', direction: 'asc' });
   const watcherReloadingRef = useRef(false);
   const watcherReloadPendingRef = useRef(false);
 
-  const mods = payload?.mods ?? [];
-  const stats = payload?.stats ?? {};
+  const mods = payload?.mods ?? EMPTY_MODS;
+  const stats = payload?.stats ?? EMPTY_STATS;
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return mods.filter((mod) => {
+    const filtered = mods.filter((mod) => {
       const matchesQuery =
         !needle ||
         `${mod.displayName} ${mod.filename} ${mod.description ?? ''}`.toLowerCase().includes(needle);
@@ -87,7 +190,10 @@ function App() {
         mod.side === filter;
       return matchesQuery && matchesFilter;
     });
-  }, [mods, query, filter]);
+    return sortMods(filtered, sort);
+  }, [mods, query, filter, sort]);
+
+  const canShowWorkspace = Boolean(settings?.instanceRoot);
 
   const applyPayload = useCallback((next) => {
     const normalized = withLocalCovers(next);
@@ -111,7 +217,7 @@ function App() {
       });
       if (!touched) return current;
       normalizeModsGraph(mods);
-      return { ...current, mods };
+      return { ...current, mods, stats: statsForMods(mods) };
     });
     setSelected((current) => (current?.key === key ? { ...current, ...patch } : current));
   }, []);
@@ -182,12 +288,13 @@ function App() {
   useEffect(() => {
     if (!visible.length) {
       setSelected(null);
-      setSelectedKeys(new Set());
+      setSelectedKeys((current) => (current.size ? new Set() : current));
       return;
     }
     if (!selected || !visible.some((mod) => mod.filename === selected.filename)) {
-      setSelected(visible[0]);
-      setSelectedKeys(new Set([visible[0].key]));
+      const next = visible[0];
+      setSelected(next);
+      setSelectedKeys(new Set([next.key]));
     }
   }, [visible, selected]);
 
@@ -195,13 +302,10 @@ function App() {
     const visibleKeys = new Set(visible.map((mod) => mod.key));
     setSelectedKeys((current) => {
       const next = new Set([...current].filter((key) => visibleKeys.has(key)));
-      if (!next.size && selected?.key && visibleKeys.has(selected.key)) {
-        next.add(selected.key);
-      }
       const same = next.size === current.size && [...next].every((key) => current.has(key));
       return same ? current : next;
     });
-  }, [selected?.key, visible]);
+  }, [visible]);
 
   const moveSelection = useCallback(
     (delta) => {
@@ -221,41 +325,40 @@ function App() {
     [visible, selected]
   );
 
-  const copySelectedFiles = useCallback(async () => {
-    const keys = [...selectedKeys];
+  const copyModKeys = useCallback(async (keys) => {
     if (!keys.length) return;
     setError('');
     try {
       const count = await copyModFiles(keys);
       setInfo(`Скопировано файлов: ${count}.`);
+      setSelectedKeys(new Set());
     } catch (err) {
       setError(String(err));
     }
-  }, [selectedKeys]);
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(event) {
       const target = event.target;
-      if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) {
+      if (isTextEntryTarget(target) || hasActiveTextSelection()) {
         return;
       }
 
       const command = event.metaKey || event.ctrlKey;
       if (command && event.key.toLowerCase() === 'a' && canShowWorkspace) {
-        event.preventDefault();
-        const keys = visible.map((mod) => mod.key);
-        setSelectedKeys(new Set(keys));
-        if (visible.length && !selected) {
-          setSelected(visible[0]);
+        if (target instanceof HTMLElement && target.closest('.descriptionCell')) {
+          return;
         }
+        event.preventDefault();
+        setSelectedKeys(new Set(visible.map((mod) => mod.key)));
         return;
       }
 
       if (command && event.key.toLowerCase() === 'c' && canShowWorkspace) {
-        if (selectedKeys.size) {
-          event.preventDefault();
-          void copySelectedFiles();
-        }
+        const keys = selectedKeys.size ? [...selectedKeys] : selected?.key ? [selected.key] : [];
+        if (!keys.length) return;
+        event.preventDefault();
+        void copyModKeys(keys);
         return;
       }
 
@@ -266,12 +369,12 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [canShowWorkspace, copySelectedFiles, moveSelection, selected, selectedKeys, visible]);
+  }, [canShowWorkspace, copyModKeys, moveSelection, selected?.key, selectedKeys, visible]);
 
   useEffect(() => {
     let unlistenMods;
     (async () => {
-      unlistenMods = await listen('mods-folder-changed', async () => {
+      unlistenMods = await listenEvent('mods-folder-changed', async () => {
         if (bootstrapping) return;
         if (watcherReloadingRef.current) {
           watcherReloadPendingRef.current = true;
@@ -301,8 +404,9 @@ function App() {
     let unlistenProgress;
     let unlistenCover;
     let unlistenDependencies;
+    let unlistenSource;
     (async () => {
-      unlistenProgress = await listen('prefetch-progress', (event) => {
+      unlistenProgress = await listenEvent('prefetch-progress', (event) => {
         const payload = event.payload;
         if (payload?.status === 'done') {
           setProgress(null);
@@ -310,23 +414,29 @@ function App() {
         }
         setProgress(payload);
       });
-      unlistenCover = await listen('cover-ready', (event) => {
+      unlistenCover = await listenEvent('cover-ready', (event) => {
         const { key, coverPath, coverModifiedAt } = event.payload ?? {};
         if (!key || !coverPath) return;
         const base = convertFileSrc(coverPath);
         const coverUrl = coverModifiedAt ? `${base}?v=${coverModifiedAt}` : base;
         updateModInPayload(key, { coverPath, coverUrl, coverModifiedAt, coverManual: false });
       });
-      unlistenDependencies = await listen('dependencies-ready', (event) => {
+      unlistenDependencies = await listenEvent('dependencies-ready', (event) => {
         const { key, dependencies } = event.payload ?? {};
         if (!key || !Array.isArray(dependencies)) return;
         updateModInPayload(key, { dependencies });
+      });
+      unlistenSource = await listenEvent('mod-source-ready', (event) => {
+        const { key, ...patch } = event.payload ?? {};
+        if (!key) return;
+        updateModInPayload(key, patch);
       });
     })();
     return () => {
       unlistenProgress?.();
       unlistenCover?.();
       unlistenDependencies?.();
+      unlistenSource?.();
     };
   }, [updateModInPayload]);
 
@@ -403,23 +513,37 @@ function App() {
     [applyPayload]
   );
 
-  const handleSwitchSource = useCallback(
-    async (source) => {
-      if (!providerKey) return;
-      setBusy(true);
-      setError('');
-      try {
-        const next = await switchModSource({ key: providerKey, source });
-        applyPayload(next);
-        setProviderKey(null);
-      } catch (err) {
-        setError(String(err));
-      } finally {
-        setBusy(false);
+  const handleProviderApplied = useCallback(
+    (patch) => {
+      const { key, coverUrl, ...sourcePatch } = patch;
+      const current = mods.find((item) => item.key === key);
+      const nextPatch = { ...sourcePatch };
+      if (coverUrl && !current?.coverManual) {
+        nextPatch.coverUrl = coverUrl;
+        nextPatch.coverPath = null;
+        nextPatch.coverManual = false;
+        nextPatch.coverModifiedAt = null;
       }
+      updateModInPayload(key, nextPatch);
+      setProviderKey(null);
     },
-    [applyPayload, providerKey]
+    [mods, updateModInPayload]
   );
+
+  const handleSort = useCallback((key) => {
+    setSort((current) => {
+      if (current.key === key) {
+        return {
+          key,
+          direction: current.direction === 'asc' ? 'desc' : 'asc'
+        };
+      }
+      return {
+        key,
+        direction: SORT_DEFAULT_DIRECTION[key] ?? 'asc'
+      };
+    });
+  }, []);
 
   const [relationsKey, setRelationsKey] = useState(null);
   const openRelationsForMod = useCallback((mod) => {
@@ -431,6 +555,25 @@ function App() {
   const providerMod = useMemo(
     () => mods.find((item) => item.key === providerKey) ?? null,
     [mods, providerKey]
+  );
+  const versionMod = useMemo(
+    () => mods.find((item) => item.key === versionKey) ?? null,
+    [mods, versionKey]
+  );
+  const tagsMod = useMemo(
+    () => mods.find((item) => item.key === tagsKey) ?? null,
+    [mods, tagsKey]
+  );
+  const descriptionMod = useMemo(
+    () => mods.find((item) => item.key === descriptionKey) ?? null,
+    [mods, descriptionKey]
+  );
+  const handleVersionInstalled = useCallback(
+    ({ key, ...patch }) => {
+      updateModInPayload(key, patch);
+      setVersionKey(null);
+    },
+    [updateModInPayload]
   );
   const handleSelectMod = useCallback(
     (mod) => {
@@ -447,7 +590,6 @@ function App() {
     setRelationsKey((current) => (current ? mod.key : current));
   }, []);
 
-  const canShowWorkspace = Boolean(settings?.instanceRoot);
   const progressPercent =
     progress?.total > 0 ? Math.min(100, Math.round((progress.index / progress.total) * 100)) : 0;
   const uiLocked = busy;
@@ -531,9 +673,14 @@ function App() {
               mods={visible}
               selected={selected}
               selectedKeys={selectedKeys}
+              sort={sort}
+              onSort={handleSort}
               onSelect={handleTableSelect}
               onCoverClick={openRelationsForMod}
               onSourceClick={(mod) => setProviderKey(mod.key)}
+              onVersionClick={(mod) => setVersionKey(mod.key)}
+              onTagsClick={(mod) => setTagsKey(mod.key)}
+              onDescriptionClick={(mod) => setDescriptionKey(mod.key)}
             />
             <aside>
               {selected ? (
@@ -595,8 +742,30 @@ function App() {
       <ProviderDialog
         mod={providerMod}
         busy={busy}
+        curseforgeApiKeySet={settings?.curseforgeApiKeySet}
         onClose={() => !busy && setProviderKey(null)}
-        onSelect={handleSwitchSource}
+        onApplied={handleProviderApplied}
+      />
+
+      <VersionDialog
+        mod={versionMod}
+        busy={busy}
+        onClose={() => !busy && setVersionKey(null)}
+        onInstalled={handleVersionInstalled}
+      />
+
+      <TagsDialog
+        mod={tagsMod}
+        busy={busy}
+        onClose={() => !busy && setTagsKey(null)}
+        onSave={patchMod}
+      />
+
+      <DescriptionDialog
+        mod={descriptionMod}
+        busy={busy}
+        onClose={() => !busy && setDescriptionKey(null)}
+        onSave={patchMod}
       />
     </main>
   );

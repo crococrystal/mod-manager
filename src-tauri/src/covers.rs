@@ -4,9 +4,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use tauri::AppHandle;
+
 use crate::catalog;
+use crate::events::emit_cover_ready;
 use crate::mods::ModEntry;
-use crate::settings::InstancePaths;
+use crate::remote::resolve_cover_url;
+use crate::settings::{InstancePaths, Settings};
 use crate::util::{file_mtime_millis, path_string};
 
 pub(crate) const COVER_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "webp", "gif"];
@@ -233,20 +237,23 @@ pub(crate) fn cache_remote_cover(
     modrinth_id: Option<&str>,
     curseforge_id: Option<&str>,
     url: &str,
+    force_download: bool,
 ) -> Option<PathBuf> {
     let prefixes = cover_platform_prefixes(modrinth_id, curseforge_id);
 
-    if let Some(root) = catalog_root {
-        for prefix in &prefixes {
-            if let Some(path) = catalog::find_catalog_cover(root, prefix) {
-                return Some(path);
+    if !force_download {
+        if let Some(root) = catalog_root {
+            for prefix in &prefixes {
+                if let Some(path) = catalog::find_catalog_cover(root, prefix) {
+                    return Some(path);
+                }
             }
         }
-    }
 
-    let dir = cover_dir(&paths.data_root, false);
-    if let Some(path) = find_cover_in_dir(&dir, &prefixes, key) {
-        return Some(path);
+        let dir = cover_dir(&paths.data_root, false);
+        if let Some(path) = find_cover_in_dir(&dir, &prefixes, key) {
+            return Some(path);
+        }
     }
 
     let response = client.get(url).send().ok()?.error_for_status().ok()?;
@@ -271,6 +278,7 @@ pub(crate) fn cache_remote_cover(
         }
     }
 
+    let dir = cover_dir(&paths.data_root, false);
     fs::create_dir_all(&dir).ok()?;
     if let Some(prefix) = prefixes.first() {
         remove_cover_prefix_variants(&dir, &prefixes);
@@ -284,6 +292,54 @@ pub(crate) fn cache_remote_cover(
     let path = dir.join(format!("{}.{}", safe_file_stem(key), ext));
     fs::write(&path, &bytes).ok()?;
     Some(path)
+}
+
+/// Скачивает обложку с API активного поставщика (после смены source).
+pub(crate) fn refetch_mod_cover_after_source_switch(
+    app: &AppHandle,
+    item: &ModEntry,
+    paths: &InstancePaths,
+    catalog_root: Option<&Path>,
+    settings: &Settings,
+    client: &reqwest::blocking::Client,
+) {
+    if item.cover_manual {
+        return;
+    }
+    if item.modrinth_id.is_none() && item.curseforge_id.is_none() {
+        return;
+    }
+
+    let cache_dir = cover_dir(&paths.data_root, false);
+    let all_prefixes =
+        cover_platform_prefixes(item.modrinth_id.as_deref(), item.curseforge_id.as_deref());
+    remove_cover_prefix_variants(&cache_dir, &all_prefixes);
+    remove_cover_variants(&cache_dir, &item.key);
+
+    let Some(url) = resolve_cover_url(item, client, &settings.curseforge_api_key) else {
+        return;
+    };
+
+    let (modrinth_id, curseforge_id) = match item.source.as_str() {
+        "curseforge" => (None, item.curseforge_id.as_deref()),
+        "modrinth" => (item.modrinth_id.as_deref(), None),
+        _ => (item.modrinth_id.as_deref(), item.curseforge_id.as_deref()),
+    };
+
+    if let Some(path) = cache_remote_cover(
+        client,
+        paths,
+        catalog_root,
+        &item.key,
+        modrinth_id,
+        curseforge_id,
+        &url,
+        true,
+    ) {
+        let mtime = file_mtime_millis(&path);
+        let stored = path_string(path);
+        emit_cover_ready(app, &item.key, &stored, mtime);
+    }
 }
 
 pub(crate) fn store_uploaded_cover(

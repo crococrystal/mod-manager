@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::Command};
+use std::path::PathBuf;
 
 use base64::{engine::general_purpose, Engine};
 use serde::Deserialize;
@@ -6,16 +6,15 @@ use tauri::AppHandle;
 
 use crate::catalog;
 use crate::covers::{cover_ext_from_mime, delete_manual_cover, store_uploaded_cover};
-use crate::file_identity::read_file_identity;
 use crate::instance_registry;
 use crate::mods::{normalize_side, scan_mods_for_settings, stats_for, ModListPayload};
 use crate::mods_watch;
 use crate::prefetch::prefetch_mod_assets_for_settings;
-use crate::remote::{
-    curseforge_fingerprint_match, curseforge_mod_info, curseforge_search_mod, http_client,
-    modrinth_project_info, modrinth_project_matches, modrinth_search_project,
-    modrinth_version_by_sha512,
+use crate::providers::{
+    InstallProviderVersionRequest, InstallProviderVersionResult, ListProviderVersionsRequest,
+    ProviderVersionsPayload, SearchProviderRequest, SwitchModSourceRequest, SwitchModSourceResult,
 };
+use crate::remote::ProviderCandidate;
 use crate::settings::{
     read_settings, remember_instance, resolve_paths, settings_view, write_settings, Settings,
     SettingsView,
@@ -34,65 +33,26 @@ pub(crate) struct UpdateModTagsRequest {
     pub dependencies: Option<Vec<String>>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SwitchModSourceRequest {
-    pub key: String,
-    pub source: String,
+fn absolute_path(path: PathBuf) -> PathBuf {
+    path.canonicalize().unwrap_or(path)
 }
 
-#[cfg(target_os = "macos")]
 fn copy_files_to_clipboard(paths: &[PathBuf]) -> Result<(), String> {
-    let script = r#"
-on run argv
-  set fileList to {}
-  repeat with filePath in argv
-    set end of fileList to POSIX file filePath
-  end repeat
-  set the clipboard to fileList
-end run
-"#;
-    let status = Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .args(paths)
-        .status()
-        .map_err(|error| error.to_string())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err("Не удалось скопировать файлы в буфер обмена.".to_string())
-    }
-}
+    use clipboard_rs::{Clipboard, ClipboardContext};
 
-#[cfg(target_os = "windows")]
-fn copy_files_to_clipboard(paths: &[PathBuf]) -> Result<(), String> {
-    let script = r#"
-Add-Type -AssemblyName System.Windows.Forms
-$files = New-Object System.Collections.Specialized.StringCollection
-foreach ($path in $args) {
-  [void]$files.Add((Resolve-Path -LiteralPath $path).Path)
-}
-[System.Windows.Forms.Clipboard]::SetFileDropList($files)
-"#;
-    let status = Command::new("powershell.exe")
-        .arg("-NoProfile")
-        .arg("-STA")
-        .arg("-Command")
-        .arg(script)
-        .args(paths)
-        .status()
-        .map_err(|error| error.to_string())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err("Не удалось скопировать файлы в буфер обмена.".to_string())
+    if paths.is_empty() {
+        return Err("Нечего копировать.".to_string());
     }
-}
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn copy_files_to_clipboard(_paths: &[PathBuf]) -> Result<(), String> {
-    Err("Копирование файлов поддержано только на macOS и Windows.".to_string())
+    let file_paths: Vec<String> = paths
+        .iter()
+        .map(|path| absolute_path(path.clone()).to_string_lossy().into_owned())
+        .collect();
+
+    let ctx = ClipboardContext::new().map_err(|error| error.to_string())?;
+    ctx.clear().map_err(|error| error.to_string())?;
+    ctx.set_files(file_paths)
+        .map_err(|_| "Не удалось скопировать файлы в буфер обмена.".to_string())
 }
 
 #[tauri::command]
@@ -249,117 +209,43 @@ pub(crate) async fn update_mod_tags(
 }
 
 #[tauri::command]
+pub(crate) async fn search_provider_candidates(
+    app: AppHandle,
+    request: SearchProviderRequest,
+) -> Result<Vec<ProviderCandidate>, String> {
+    crate::providers::search_candidates(app, request).await
+}
+
+#[tauri::command]
+pub(crate) async fn lookup_provider_fingerprint(
+    app: AppHandle,
+    request: SearchProviderRequest,
+) -> Result<Option<ProviderCandidate>, String> {
+    crate::providers::lookup_fingerprint(app, request).await
+}
+
+#[tauri::command]
 pub(crate) async fn switch_mod_source(
     app: AppHandle,
     request: SwitchModSourceRequest,
-) -> Result<ModListPayload, String> {
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<ModListPayload, String> {
-        let target = request.source.trim().to_ascii_lowercase();
-        if target != "modrinth" && target != "curseforge" {
-            return Err("Можно выбрать только Modrinth или CurseForge.".to_string());
-        }
+) -> Result<SwitchModSourceResult, String> {
+    crate::providers::switch_source(app, request).await
+}
 
-        let settings = read_settings(&app_handle)?;
-        let paths = resolve_paths(&settings)?;
-        let catalog_root = catalog::catalog_root(&app_handle).ok();
-        let mods = scan_mods_for_settings(&settings, catalog_root.clone())?;
-        let selected = mods
-            .iter()
-            .find(|item| item.key == request.key)
-            .ok_or_else(|| "Мод не найден в текущей сборке.".to_string())?;
-        let display_name = selected.display_name.clone();
-        let filename = selected.filename.clone();
-        let has_modrinth = selected.modrinth_id.is_some();
-        let has_curseforge = selected.curseforge_id.is_some();
+#[tauri::command]
+pub(crate) async fn list_provider_versions(
+    app: AppHandle,
+    request: ListProviderVersionsRequest,
+) -> Result<ProviderVersionsPayload, String> {
+    crate::providers::list_versions(app, request).await
+}
 
-        let client = http_client().ok_or_else(|| "Не удалось создать HTTP-клиент.".to_string())?;
-        let mut tags = read_tags(&paths.tags_path)?;
-        let tag = tags.mods.entry(request.key.clone()).or_default();
-
-        match target.as_str() {
-            "modrinth" => {
-                let existing_modrinth_id = tag.modrinth_id.trim().to_string();
-                let mut invalid_saved_modrinth = false;
-                if !existing_modrinth_id.is_empty() {
-                    let matches_saved = modrinth_project_info(&client, &existing_modrinth_id)
-                        .is_some_and(|project| modrinth_project_matches(&project, &display_name));
-                    if !matches_saved {
-                        tag.modrinth_id.clear();
-                        invalid_saved_modrinth = true;
-                    }
-                }
-                if (!has_modrinth || invalid_saved_modrinth) && tag.modrinth_id.trim().is_empty() {
-                    if let Ok(identity) = read_file_identity(&paths.mods_dir.join(&filename)) {
-                        if let Some(found) = modrinth_version_by_sha512(&client, &identity.sha512) {
-                            tag.modrinth_id = found.project_id;
-                            tag.modrinth_version_id = found.version_id;
-                        }
-                    }
-                }
-                if (!has_modrinth || invalid_saved_modrinth) && tag.modrinth_id.trim().is_empty() {
-                    if let Some(project) = modrinth_search_project(&client, &display_name) {
-                        tag.modrinth_id = project.id;
-                    } else {
-                        if invalid_saved_modrinth {
-                            tags.updated_at = now_iso();
-                            write_tags(&paths.tags_path, &tags)?;
-                        }
-                        return Err("Мод не найден на Modrinth.".to_string());
-                    }
-                }
-            }
-            "curseforge" => {
-                if !has_curseforge && tag.curseforge_id.trim().is_empty() {
-                    if settings.curseforge_api_key.trim().is_empty() {
-                        return Err("Для поиска на CurseForge нужен API key.".to_string());
-                    }
-                    if let Ok(identity) = read_file_identity(&paths.mods_dir.join(&filename)) {
-                        if let Some(found) = curseforge_fingerprint_match(
-                            &client,
-                            &settings.curseforge_api_key,
-                            identity.curseforge_fingerprint,
-                        ) {
-                            let slug = curseforge_mod_info(
-                                &client,
-                                &settings.curseforge_api_key,
-                                &found.project_id,
-                            )
-                            .and_then(|project| project.slug)
-                            .unwrap_or_default();
-                            tag.curseforge_id = found.project_id;
-                            tag.curseforge_file_id = found.file_id;
-                            tag.curseforge_slug = slug;
-                        }
-                    }
-                }
-                if !has_curseforge && tag.curseforge_id.trim().is_empty() {
-                    let project =
-                        curseforge_search_mod(&client, &settings.curseforge_api_key, &display_name)
-                            .ok_or_else(|| "Мод не найден на CurseForge.".to_string())?;
-                    tag.curseforge_id = project.id;
-                    tag.curseforge_slug = project.slug.unwrap_or_default();
-                }
-            }
-            _ => unreachable!(),
-        }
-
-        tag.source = target;
-        tag.updated_at = now_iso();
-        tags.updated_at = now_iso();
-        write_tags(&paths.tags_path, &tags)?;
-
-        let view = settings_view(&app_handle, settings.clone())?;
-        let mods = scan_mods_for_settings(&settings, catalog_root)?;
-        let stats = stats_for(&mods);
-        Ok(ModListPayload {
-            settings: view,
-            mods,
-            stats,
-        })
-    })
-    .await
-    .map_err(|error| format!("Переключение поставщика прервано: {error}"))?
+#[tauri::command]
+pub(crate) async fn install_provider_version(
+    app: AppHandle,
+    request: InstallProviderVersionRequest,
+) -> Result<InstallProviderVersionResult, String> {
+    crate::providers::install_version(app, request).await
 }
 
 #[tauri::command]
@@ -380,7 +266,7 @@ pub(crate) async fn copy_mod_files(app: AppHandle, keys: Vec<String>) -> Result<
             let Some(item) = mods.iter().find(|mod_entry| mod_entry.key == key) else {
                 continue;
             };
-            let path = paths.mods_dir.join(&item.filename);
+            let path = absolute_path(paths.mods_dir.join(&item.filename));
             if path.is_file() {
                 file_paths.push(path);
             }

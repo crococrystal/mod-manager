@@ -7,8 +7,9 @@ use std::{
 
 use crate::covers::apply_existing_cover;
 use crate::dependencies::apply_jar_dependencies;
+use crate::mod_names::{display_name_from_filename, installed_version_from_filename};
 use crate::settings::{resolve_paths, Settings, SettingsView};
-use crate::tags::{read_tags, write_tags, ModTags};
+use crate::tags::{read_tags, write_tags, ModTags, TagFile};
 use crate::util::{now_iso, system_time_iso};
 
 #[derive(Clone, Debug)]
@@ -30,6 +31,9 @@ pub(crate) struct ModEntry {
     pub filename: String,
     pub base: String,
     pub display_name: String,
+    #[serde(skip)]
+    pub display_name_locked: bool,
+    pub installed_version: Option<String>,
     pub side: String,
     pub library: bool,
     pub technical: bool,
@@ -184,7 +188,39 @@ fn clean_tag_value(value: &str) -> Option<String> {
     }
 }
 
-fn source_url(
+fn alias_keys_by_filename(tags: &TagFile) -> HashMap<String, String> {
+    let mut entries: Vec<(&String, &ModTags)> = tags.mods.iter().collect();
+    entries.sort_by(|left, right| left.0.cmp(right.0));
+    let mut map = HashMap::new();
+    for (key, tag) in entries {
+        for alias in &tag.aliases {
+            let alias = alias.trim();
+            if !alias.is_empty() {
+                map.entry(alias.to_string()).or_insert_with(|| key.clone());
+            }
+        }
+    }
+    map
+}
+
+fn key_for_file(
+    filename: &str,
+    info: Option<&IndexInfo>,
+    alias_keys: &HashMap<String, String>,
+) -> String {
+    if info
+        .and_then(|info| info.modrinth_id.as_ref().or(info.curseforge_id.as_ref()))
+        .is_some()
+    {
+        return stable_key(filename, info);
+    }
+    alias_keys
+        .get(filename)
+        .cloned()
+        .unwrap_or_else(|| stable_key(filename, info))
+}
+
+pub(crate) fn source_url(
     source: &str,
     modrinth_id: Option<&str>,
     curseforge_slug: Option<&str>,
@@ -249,6 +285,7 @@ pub(crate) fn scan_mods_for_settings(
     let paths = resolve_paths(settings)?;
     let index = read_index(&paths.index_dir);
     let mut tags = read_tags(&paths.tags_path)?;
+    let alias_keys = alias_keys_by_filename(&tags);
     let mut changed = false;
     let mut base_counts: HashMap<String, usize> = HashMap::new();
     let mut jars = Vec::new();
@@ -274,7 +311,7 @@ pub(crate) fn scan_mods_for_settings(
         let path = paths.mods_dir.join(&filename);
         let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
         let info = index.get(&filename);
-        let key = stable_key(&filename, info);
+        let key = key_for_file(&filename, info, &alias_keys);
         let default_source = if info.and_then(|info| info.modrinth_id.as_ref()).is_some() {
             "modrinth"
         } else if info.and_then(|info| info.curseforge_id.as_ref()).is_some() {
@@ -301,6 +338,12 @@ pub(crate) fn scan_mods_for_settings(
             );
             changed = true;
         }
+        if let Some(tag) = tags.mods.get_mut(&key) {
+            if !tag.aliases.iter().any(|alias| alias == &filename) {
+                tag.aliases.push(filename.clone());
+                changed = true;
+            }
+        }
 
         let tag = tags.mods.get(&key).cloned().unwrap_or_default();
         let tag_modrinth_id = clean_tag_value(&tag.modrinth_id);
@@ -308,6 +351,8 @@ pub(crate) fn scan_mods_for_settings(
         let tag_curseforge_id = clean_tag_value(&tag.curseforge_id);
         let tag_curseforge_file_id = clean_tag_value(&tag.curseforge_file_id);
         let tag_curseforge_slug = clean_tag_value(&tag.curseforge_slug);
+        let tag_display_name = clean_tag_value(&tag.display_name);
+        let tag_provider_title = clean_tag_value(&tag.provider_title);
         let modrinth_id = tag_modrinth_id
             .clone()
             .or_else(|| info.and_then(|info| info.modrinth_id.clone()));
@@ -335,14 +380,22 @@ pub(crate) fn scan_mods_for_settings(
         });
         let dependencies = tag.dependencies.clone();
         let resolved_dependencies = merge_keys(&[&dependencies, &[]]);
+        let indexed_name = info.and_then(|info| info.name.clone());
+        let display_name_locked =
+            tag_display_name.is_some() || tag_provider_title.is_some() || indexed_name.is_some();
+        let display_name = tag_display_name
+            .or(tag_provider_title)
+            .or(indexed_name)
+            .unwrap_or_else(|| display_name_from_filename(&filename));
+        let installed_version = installed_version_from_filename(&filename);
 
         mods.push(ModEntry {
             key,
             filename: filename.clone(),
             base: filename.clone(),
-            display_name: info
-                .and_then(|info| info.name.clone())
-                .unwrap_or_else(|| filename.trim_end_matches(".jar").to_string()),
+            display_name,
+            display_name_locked,
+            installed_version,
             side,
             library: tag.library,
             technical: tag.technical,

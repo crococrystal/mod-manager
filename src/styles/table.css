@@ -60,16 +60,31 @@ td:nth-child(1) {
 
 th:nth-child(2),
 td:nth-child(2) {
-  width: 30%;
+  width: 56px;
+}
+
+th:nth-child(3),
+td:nth-child(3) {
+  width: 24%;
 }
 
 th:nth-child(4),
 td:nth-child(4) {
-  width: 172px;
+  width: auto;
 }
 
 th:nth-child(5),
 td:nth-child(5) {
+  width: 92px;
+}
+
+th:nth-child(6),
+td:nth-child(6) {
+  width: 132px;
+}
+
+th:nth-child(7),
+td:nth-child(7) {
   width: 82px;
 }
 
@@ -79,14 +94,101 @@ td strong {
   text-overflow: ellipsis;
 }
 
-.descriptionCell {
+.tableWrap table .descriptionCell {
   color: #b0b8bd;
+}
+
+.descriptionCell button {
+  display: inline-block;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.descriptionCell button:hover {
+  color: #e5ecef;
+}
+
+.sortHeader {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sortHeader span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sortHeader svg {
+  flex: 0 0 auto;
+  color: #708089;
+}
+
+.sortHeader.active {
+  color: #e4eaec;
+}
+
+.sortHeader.active svg {
+  color: #7bb7a3;
+}
+
+.versionCell button {
+  display: inline-block;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #d9dddf;
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.versionCell button:hover:not(:disabled) {
+  color: #8de3bc;
+}
+
+.versionCell button:disabled {
+  color: #6f7a81;
+  cursor: default;
 }
 
 .tagMark {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.tagMarkButton {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
 }
 
 .sourceIcon {

@@ -1,9 +1,40 @@
 import { useEffect, useRef } from 'react';
+import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { formatDate } from '../../lib/modMeta.jsx';
 import { ModCover } from './ModCover.jsx';
 import { SourceIcon, TagMark } from './ModBadges.jsx';
 
-export function ModTable({ mods, selected, selectedKeys, onSelect, onCoverClick, onSourceClick }) {
+function SortHeader({ id, children, sort, onSort }) {
+  const active = sort?.key === id;
+  const Icon = active ? (sort.direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+  return (
+    <button type="button" className={`sortHeader${active ? ' active' : ''}`} onClick={() => onSort(id)}>
+      <span>{children}</span>
+      <Icon size={12} />
+    </button>
+  );
+}
+
+function canChangeVersion(mod) {
+  return Boolean(
+    (mod.source === 'modrinth' && mod.modrinthId) ||
+      (mod.source === 'curseforge' && mod.curseforgeId)
+  );
+}
+
+export function ModTable({
+  mods,
+  selected,
+  selectedKeys,
+  sort,
+  onSort,
+  onSelect,
+  onCoverClick,
+  onSourceClick,
+  onVersionClick,
+  onTagsClick,
+  onDescriptionClick
+}) {
   const wrapRef = useRef(null);
 
   useEffect(() => {
@@ -17,17 +48,18 @@ export function ModTable({ mods, selected, selectedKeys, onSelect, onCoverClick,
       <table>
         <thead>
           <tr>
-            <th>Метка</th>
+            <th><SortHeader id="tag" sort={sort} onSort={onSort}>Метка</SortHeader></th>
             <th aria-hidden="true" />
-            <th>Название</th>
-            <th>Описание</th>
-            <th>Дата</th>
-            <th>Источник</th>
+            <th><SortHeader id="name" sort={sort} onSort={onSort}>Название</SortHeader></th>
+            <th><SortHeader id="description" sort={sort} onSort={onSort}>Описание</SortHeader></th>
+            <th><SortHeader id="version" sort={sort} onSort={onSort}>Версия</SortHeader></th>
+            <th><SortHeader id="date" sort={sort} onSort={onSort}>Дата</SortHeader></th>
+            <th><SortHeader id="source" sort={sort} onSort={onSort}>Источник</SortHeader></th>
           </tr>
         </thead>
         <tbody>
           {mods.map((mod) => {
-            const active = selected?.filename === mod.filename || selectedKeys?.has(mod.key);
+            const active = selectedKeys?.has(mod.key);
             return (
               <tr
                 key={mod.filename}
@@ -35,7 +67,19 @@ export function ModTable({ mods, selected, selectedKeys, onSelect, onCoverClick,
                 className={active ? 'selected' : ''}
                 onClick={(event) => onSelect(mod, event)}
               >
-                <td><TagMark mod={mod} /></td>
+                <td>
+                  <button
+                    type="button"
+                    className="tagMarkButton"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onTagsClick?.(mod);
+                    }}
+                    title="Метки мода"
+                  >
+                    <TagMark mod={mod} />
+                  </button>
+                </td>
                 <td className="coverCell" onClick={(event) => event.stopPropagation()}>
                   <ModCover
                     mod={mod}
@@ -46,8 +90,32 @@ export function ModTable({ mods, selected, selectedKeys, onSelect, onCoverClick,
                 <td>
                   <strong>{mod.displayName}</strong>
                 </td>
-                <td className="descriptionCell" title={mod.description || undefined}>
-                  {mod.description || '—'}
+                <td
+                  className="descriptionCell"
+                  title={mod.description || undefined}
+                >
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onDescriptionClick?.(mod);
+                    }}
+                  >
+                    {mod.description || '—'}
+                  </button>
+                </td>
+                <td className="versionCell">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onVersionClick?.(mod);
+                    }}
+                    disabled={!canChangeVersion(mod)}
+                    title={canChangeVersion(mod) ? 'Версии мода' : 'Сначала выбери поставщика'}
+                  >
+                    {mod.installedVersion || '—'}
+                  </button>
                 </td>
                 <td>{formatDate(mod.modifiedAt)}</td>
                 <td onClick={(event) => event.stopPropagation()}>

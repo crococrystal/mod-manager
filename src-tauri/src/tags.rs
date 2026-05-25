@@ -34,6 +34,10 @@ pub(crate) struct ModTags {
     #[serde(default)]
     pub aliases: Vec<String>,
     #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub provider_title: String,
+    #[serde(default)]
     pub source: String,
     #[serde(default)]
     pub modrinth_id: String,

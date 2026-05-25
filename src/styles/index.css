@@ -582,7 +582,7 @@ td:nth-child(2) {
 
 th:nth-child(3),
 td:nth-child(3) {
-  width: 26%;
+  width: 24%;
 }
 
 th:nth-child(4),
@@ -592,11 +592,16 @@ td:nth-child(4) {
 
 th:nth-child(5),
 td:nth-child(5) {
-  width: 168px;
+  width: 92px;
 }
 
 th:nth-child(6),
 td:nth-child(6) {
+  width: 132px;
+}
+
+th:nth-child(7),
+td:nth-child(7) {
   width: 76px;
 }
 
@@ -716,8 +721,85 @@ td:nth-child(6) {
   background: #101416;
 }
 
-.descriptionCell {
+.tableWrap table .descriptionCell {
   color: #b0b8bd;
+}
+
+.descriptionCell button {
+  display: inline-block;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.descriptionCell button:hover {
+  color: #e5ecef;
+}
+
+.sortHeader {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sortHeader span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sortHeader svg {
+  flex: 0 0 auto;
+  color: #708089;
+}
+
+.sortHeader.active {
+  color: #e4eaec;
+}
+
+.sortHeader.active svg {
+  color: #7bb7a3;
+}
+
+.versionCell button {
+  display: inline-block;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #d9dddf;
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.versionCell button:hover:not(:disabled) {
+  color: #8de3bc;
+}
+
+.versionCell button:disabled {
+  color: #6f7a81;
+  cursor: default;
 }
 
 td strong {
@@ -738,6 +820,20 @@ td small {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.tagMarkButton {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.tagMarkButton:hover .tagIcon {
+  filter: brightness(1.25);
 }
 
 .tagMark svg {
@@ -871,6 +967,272 @@ td small {
   opacity: 0.75;
 }
 
+.providerOptionHint {
+  color: #9eb0b8;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.providerSearchError {
+  margin: 0 16px 8px;
+  color: #f3a68c;
+  font-size: 13px;
+}
+
+.providerCurrentLink {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 7px;
+  margin: -2px 16px 2px;
+  color: #c8d1d6;
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.providerCurrentLink:hover {
+  color: #8de3bc;
+}
+
+.providerResults {
+  display: grid;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.providerBack {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #9eb0b8;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.providerBack:hover:not(:disabled) {
+  color: #eef2f3;
+}
+
+.providerCandidateList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.providerCandidate {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 12px;
+  border: 1px solid #35444b;
+  border-radius: 8px;
+  background: #12171a;
+  color: #eef2f3;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.providerCandidate:hover:not(:disabled) {
+  border-color: #2dbd63;
+  background: #14211b;
+}
+
+.providerCandidate:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.providerCandidateIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.providerCandidateIcon.placeholder {
+  display: block;
+  background: #1e272c;
+}
+
+.providerCandidateText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.providerCandidateText strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providerCandidateText span {
+  color: #9eb0b8;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.versionModalStack {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.versionModal {
+  min-height: 180px;
+  max-height: min(620px, calc(100vh - 136px));
+  padding: 8px;
+  border: 1px solid #48555c;
+  border-radius: 10px;
+  background: #171d20;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
+  overflow: auto;
+}
+
+.versionState {
+  margin: 0;
+  padding: 18px;
+  color: #9eb0b8;
+  font-size: 13px;
+  text-align: center;
+}
+
+.versionLoading {
+  display: grid;
+  min-height: 320px;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+}
+
+.versionLoading svg {
+  color: #8de3bc;
+}
+
+.spin {
+  animation: spin 0.85s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.versionList {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.versionRow {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 96px 34px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 68px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #e7ecee;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.versionRow:hover:not(:disabled) {
+  background: #253034;
+}
+
+.versionRow.installed {
+  background: #14231c;
+  box-shadow: inset 0 0 0 1px #2dbd63;
+  cursor: default;
+}
+
+.versionRow.installed:hover:not(:disabled) {
+  background: #172b22;
+}
+
+.versionRow:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.versionType {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #244b34;
+  color: #4bf28a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.versionRow.installed .versionType {
+  background: #2d6b43;
+  color: #dfffea;
+}
+
+.versionText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.versionText strong,
+.versionText span,
+.versionText small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.versionText strong {
+  color: #fff;
+  font-size: 14px;
+}
+
+.versionText span,
+.versionText small {
+  color: #9eb0b8;
+  font-size: 12px;
+}
+
+.versionDate {
+  color: #aab4ba;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.versionInstall {
+  display: grid;
+  place-items: center;
+  color: #35df75;
+  font-weight: 800;
+}
+
+.versionRow.installed .versionInstall {
+  color: #8de3bc;
+}
+
 aside {
   position: relative;
   z-index: 4;
@@ -883,7 +1245,7 @@ aside {
 .editor {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 18px;
   height: 100%;
   overflow: auto;
   padding: 16px;
@@ -993,6 +1355,41 @@ aside {
 }
 
 .controlGroup label {
+  color: #a7b0b6;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.compactModalStack {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.compactModal {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #48555c;
+  border-radius: 10px;
+  background: #171d20;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
+}
+
+.compactModal textarea {
+  min-height: 150px;
+}
+
+.compactModalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tagDialogGroup {
+  display: grid;
+  gap: 8px;
+}
+
+.tagDialogGroup > span {
   color: #a7b0b6;
   font-size: 12px;
   font-weight: 650;

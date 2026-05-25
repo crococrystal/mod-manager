@@ -1,7 +1,29 @@
 use std::collections::HashMap;
 
+use serde::Serialize;
+
+use crate::mod_names::{
+    hyphenated_to_spaced, is_version_or_loader_segment, mod_name_tokens, normalized_match_key,
+    slug_key, spaced_camel_case, strip_filename_decorations, strip_qualifiers,
+    strip_version_suffixes,
+};
 use crate::mods::ModEntry;
 use crate::settings::Settings;
+
+pub(crate) const PROVIDER_SEARCH_LIMIT: usize = 5;
+/// Один запрос search к API поставщика (limit=5 внутри ответа).
+const PROVIDER_SEARCH_QUERY_LIMIT: usize = 1;
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderCandidate {
+    pub id: String,
+    pub slug: Option<String>,
+    pub title: String,
+    pub icon_url: Option<String>,
+    #[serde(default)]
+    pub match_score: u32,
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct ModrinthVersionMatch {
@@ -31,6 +53,21 @@ pub(crate) fn http_client() -> Option<reqwest::blocking::Client> {
         .ok()
 }
 
+pub(crate) fn search_http_client() -> Option<reqwest::blocking::Client> {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .user_agent("mod-manager/0.1.0")
+        .build()
+        .ok()
+}
+
+fn search_queries_for_api(display_name: &str) -> Vec<String> {
+    search_queries_from_display_name(display_name)
+        .into_iter()
+        .take(PROVIDER_SEARCH_QUERY_LIMIT)
+        .collect()
+}
+
 pub(crate) fn modrinth_project(
     client: &reqwest::blocking::Client,
     project_id: &str,
@@ -45,94 +82,173 @@ pub(crate) fn modrinth_project(
         .ok()
 }
 
-pub(crate) fn modrinth_project_info(
-    client: &reqwest::blocking::Client,
-    project_id: &str,
-) -> Option<ProviderProject> {
-    let payload = modrinth_project(client, project_id)?;
-    let id = payload
-        .get("id")
-        .or_else(|| payload.get("slug"))
-        .and_then(|value| value.as_str())?;
-    Some(ProviderProject {
-        id: id.to_string(),
-        slug: payload
-            .get("slug")
-            .and_then(|value| value.as_str())
-            .map(str::to_string),
-        title: payload
-            .get("title")
-            .and_then(|value| value.as_str())
-            .map(str::to_string),
-        project_type: payload
-            .get("project_type")
-            .and_then(|value| value.as_str())
-            .map(str::to_string),
-    })
+fn push_unique_query(queries: &mut Vec<String>, candidate: &str) {
+    let trimmed = candidate.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if !queries.iter().any(|existing| existing == trimmed) {
+        queries.push(trimmed.to_string());
+    }
 }
 
-fn strip_qualifiers(value: &str) -> String {
-    let mut result = String::new();
-    let mut depth = 0u32;
-    for ch in value.chars() {
-        match ch {
-            '(' | '[' => depth = depth.saturating_add(1),
-            ')' | ']' => depth = depth.saturating_sub(1),
-            _ if depth == 0 => result.push(ch),
-            _ => {}
+fn normalized_prefix_match(jar_key: &str, catalog_key: &str) -> bool {
+    const MIN_LEN: usize = 8;
+    const OK_EXTRA_SUFFIXES: &[&str] = &[
+        "edition",
+        "jeiedition",
+        "lite",
+        "plus",
+        "extra",
+        "fix",
+        "api",
+        "lib",
+    ];
+    if jar_key.len() < MIN_LEN || catalog_key.len() < MIN_LEN {
+        return false;
+    }
+    if jar_key == catalog_key {
+        return true;
+    }
+    if jar_key.starts_with(catalog_key) {
+        return true;
+    }
+    if !catalog_key.starts_with(jar_key) {
+        return false;
+    }
+    let extra = &catalog_key[jar_key.len()..];
+    if extra.is_empty() {
+        return true;
+    }
+    if extra.len() <= 12 {
+        return OK_EXTRA_SUFFIXES.iter().any(|suffix| extra == *suffix);
+    }
+    false
+}
+
+fn search_queries_from_display_name(display_name: &str) -> Vec<String> {
+    let trimmed = strip_filename_decorations(display_name);
+    let clean = strip_qualifiers(&trimmed);
+    let tokens = mod_name_tokens(display_name);
+    let stripped = strip_version_suffixes(&trimmed);
+    let spaced = tokens.join(" ");
+    let underscored = tokens.join("_");
+    let hyphen_spaced = if spaced.is_empty() {
+        hyphenated_to_spaced(&stripped)
+    } else {
+        spaced.clone()
+    };
+    let camel = spaced_camel_case(&stripped);
+    let mut queries = Vec::new();
+    for candidate in [
+        spaced.as_str(),
+        underscored.as_str(),
+        hyphen_spaced.as_str(),
+        camel.as_str(),
+        stripped.as_str(),
+        clean.as_str(),
+        trimmed.as_str(),
+    ] {
+        push_unique_query(&mut queries, candidate);
+    }
+    queries
+}
+
+pub(crate) fn candidate_match_score(display_name: &str, candidate: &ProviderCandidate) -> u32 {
+    let project = ProviderProject {
+        id: candidate.id.clone(),
+        slug: candidate.slug.clone(),
+        title: Some(candidate.title.clone()),
+        project_type: Some("mod".to_string()),
+    };
+    if modrinth_project_matches(&project, display_name) {
+        return 1000;
+    }
+    if provider_project_matches(&project, display_name) {
+        return 800;
+    }
+    let stem = strip_version_suffixes(&strip_filename_decorations(display_name));
+    let tokens: Vec<&str> = stem
+        .split(&['-', '_', ' '][..])
+        .filter(|part| part.len() >= 2 && !is_version_or_loader_segment(part))
+        .collect();
+    if tokens.is_empty() {
+        return 0;
+    }
+    let hay = format!(
+        "{} {}",
+        candidate.title,
+        candidate.slug.as_deref().unwrap_or_default()
+    )
+    .to_ascii_lowercase();
+    let matched = tokens
+        .iter()
+        .filter(|token| hay.contains(&token.to_ascii_lowercase()))
+        .count();
+    (matched as u32) * 50
+}
+
+fn sort_candidates_by_relevance(display_name: &str, candidates: &mut [ProviderCandidate]) {
+    for candidate in candidates.iter_mut() {
+        candidate.match_score = candidate_match_score(display_name, candidate);
+    }
+    candidates.sort_by(|left, right| right.match_score.cmp(&left.match_score));
+}
+
+fn match_keys_for_display_name(display_name: &str) -> (Vec<String>, Vec<String>) {
+    let trimmed = strip_filename_decorations(display_name);
+    let clean = strip_qualifiers(&trimmed);
+    let stripped = strip_version_suffixes(&trimmed);
+    let mut name_keys = Vec::new();
+    let mut slug_keys = Vec::new();
+    for candidate in [trimmed.as_str(), clean.as_str(), stripped.as_str()] {
+        let normalized = normalized_match_key(candidate);
+        if !normalized.is_empty() && !name_keys.contains(&normalized) {
+            name_keys.push(normalized);
+        }
+        let slug = slug_key(candidate);
+        if !slug.is_empty() && !slug_keys.contains(&slug) {
+            slug_keys.push(slug);
         }
     }
-    result.trim().to_string()
-}
-
-fn normalized_match_key(value: &str) -> String {
-    value
-        .to_ascii_lowercase()
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .collect()
-}
-
-fn slug_key(value: &str) -> String {
-    let mut result = String::new();
-    let mut previous_dash = false;
-    for ch in value.to_ascii_lowercase().chars() {
-        if ch.is_ascii_alphanumeric() {
-            result.push(ch);
-            previous_dash = false;
-        } else if !previous_dash {
-            result.push('-');
-            previous_dash = true;
-        }
+    let stem = normalized_match_key(&stripped);
+    if !stem.is_empty() && !name_keys.contains(&stem) {
+        name_keys.push(stem);
     }
-    result.trim_matches('-').to_string()
+    (name_keys, slug_keys)
 }
 
 pub(crate) fn provider_project_matches(project: &ProviderProject, display_name: &str) -> bool {
-    let clean = strip_qualifiers(display_name);
-    let mut name_keys = vec![normalized_match_key(display_name)];
-    let clean_key = normalized_match_key(&clean);
-    if !clean_key.is_empty() && !name_keys.contains(&clean_key) {
-        name_keys.push(clean_key);
-    }
+    let (name_keys, slug_keys) = match_keys_for_display_name(display_name);
+    let jar_stem = normalized_match_key(&strip_version_suffixes(&strip_filename_decorations(
+        display_name,
+    )));
 
     if let Some(title) = project.title.as_deref() {
         let title_key = normalized_match_key(title);
         if !title_key.is_empty() && name_keys.contains(&title_key) {
             return true;
         }
+        if normalized_prefix_match(&jar_stem, &title_key) {
+            return true;
+        }
     }
 
-    let mut slug_keys = vec![slug_key(display_name)];
-    let clean_slug = slug_key(&clean);
-    if !clean_slug.is_empty() && !slug_keys.contains(&clean_slug) {
-        slug_keys.push(clean_slug);
+    if let Some(slug) = project.slug.as_deref() {
+        let slug_norm = normalized_match_key(slug);
+        if !slug_norm.is_empty() && name_keys.contains(&slug_norm) {
+            return true;
+        }
+        if normalized_prefix_match(&jar_stem, &slug_norm) {
+            return true;
+        }
+        let slug_slug = slug_key(slug);
+        if !slug_slug.is_empty() && slug_keys.contains(&slug_slug) {
+            return true;
+        }
     }
-    project
-        .slug
-        .as_deref()
-        .map(slug_key)
-        .is_some_and(|slug| !slug.is_empty() && slug_keys.contains(&slug))
+
+    false
 }
 
 pub(crate) fn modrinth_project_matches(project: &ProviderProject, display_name: &str) -> bool {
@@ -316,7 +432,20 @@ pub(crate) fn modrinth_search_icon(
     client: &reqwest::blocking::Client,
     display_name: &str,
 ) -> Option<String> {
-    let query = urlencoding::encode(display_name.trim());
+    for query_text in search_queries_from_display_name(display_name) {
+        if let Some(url) = modrinth_search_icon_query(client, &query_text, display_name) {
+            return Some(url);
+        }
+    }
+    None
+}
+
+fn modrinth_search_icon_query(
+    client: &reqwest::blocking::Client,
+    query_text: &str,
+    display_name: &str,
+) -> Option<String> {
+    let query = urlencoding::encode(query_text.trim());
     if query.is_empty() {
         return None;
     }
@@ -363,88 +492,222 @@ pub(crate) fn modrinth_search_icon(
         })
 }
 
-pub(crate) fn modrinth_search_project(
+fn modrinth_hit_to_project(hit: &serde_json::Value) -> Option<ProviderProject> {
+    let id = hit
+        .get("project_id")
+        .or_else(|| hit.get("slug"))
+        .and_then(|value| value.as_str())?;
+    Some(ProviderProject {
+        id: id.to_string(),
+        slug: hit
+            .get("slug")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        title: hit
+            .get("title")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        project_type: hit
+            .get("project_type")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+    })
+}
+
+fn fetch_modrinth_search_batch(
     client: &reqwest::blocking::Client,
-    display_name: &str,
-) -> Option<ProviderProject> {
-    let query = urlencoding::encode(display_name.trim());
+    query_text: &str,
+    limit: usize,
+) -> Vec<ProviderCandidate> {
+    let query = urlencoding::encode(query_text.trim());
     if query.is_empty() {
-        return None;
+        return Vec::new();
     }
     let facets = urlencoding::encode(r#"[["project_type:mod"]]"#);
-    let payload = client
+    let Ok(payload) = client
         .get(format!(
-            "https://api.modrinth.com/v2/search?query={query}&limit=10&index=relevance&facets={facets}"
+            "https://api.modrinth.com/v2/search?query={query}&limit={limit}&index=relevance&facets={facets}"
         ))
         .send()
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .json::<serde_json::Value>()
-        .ok()?;
+        .and_then(|response| response.error_for_status())
+        .and_then(|response| response.json::<serde_json::Value>())
+    else {
+        return Vec::new();
+    };
     let hits = payload
         .get("hits")
         .and_then(|hits| hits.as_array())
         .cloned()
         .unwrap_or_default();
-    hits.into_iter().find_map(|hit| {
-        let id = hit
-            .get("project_id")
-            .or_else(|| hit.get("slug"))
-            .and_then(|value| value.as_str())?;
-        let project = ProviderProject {
-            id: id.to_string(),
-            slug: hit
-                .get("slug")
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
-            title: hit
-                .get("title")
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
-            project_type: hit
-                .get("project_type")
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
-        };
-        modrinth_project_matches(&project, display_name).then_some(project)
-    })
+    hits.iter()
+        .filter_map(|hit| {
+            let project = modrinth_hit_to_project(hit)?;
+            if project.project_type.as_deref() != Some("mod") {
+                return None;
+            }
+            Some(ProviderCandidate {
+                id: project.id,
+                slug: project.slug,
+                title: project
+                    .title
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| "Без названия".to_string()),
+                icon_url: non_empty_json_string(hit.get("icon_url")),
+                match_score: 0,
+            })
+        })
+        .collect()
 }
 
-pub(crate) fn curseforge_search_mod(
+pub(crate) fn list_modrinth_candidates(
+    client: &reqwest::blocking::Client,
+    display_name: &str,
+) -> Vec<ProviderCandidate> {
+    let mut seen = std::collections::HashSet::new();
+    let mut candidates = Vec::new();
+    for query_text in search_queries_for_api(display_name) {
+        for candidate in fetch_modrinth_search_batch(client, &query_text, PROVIDER_SEARCH_LIMIT) {
+            if seen.insert(candidate.id.clone()) {
+                candidates.push(candidate);
+            }
+        }
+        if candidates.len() >= PROVIDER_SEARCH_LIMIT {
+            break;
+        }
+    }
+    sort_candidates_by_relevance(display_name, &mut candidates);
+    candidates.truncate(PROVIDER_SEARCH_LIMIT);
+    candidates
+}
+
+fn fetch_curseforge_search_batch(
     client: &reqwest::blocking::Client,
     api_key: &str,
-    display_name: &str,
-) -> Option<ProviderProject> {
-    let query = urlencoding::encode(display_name.trim());
-    if query.is_empty() || api_key.trim().is_empty() {
-        return None;
+    query_text: &str,
+    limit: usize,
+) -> Vec<ProviderCandidate> {
+    if api_key.trim().is_empty() {
+        return Vec::new();
     }
-    let payload = curseforge_get(
+    let query = urlencoding::encode(query_text.trim());
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let Some(payload) = curseforge_get(
         client,
         api_key,
-        &format!("mods/search?gameId=432&classId=6&searchFilter={query}&pageSize=10"),
-    )?;
+        &format!("mods/search?gameId=432&classId=6&searchFilter={query}&pageSize={limit}"),
+    ) else {
+        return Vec::new();
+    };
     let items = payload
         .get("data")
         .and_then(|data| data.as_array())
         .cloned()
         .unwrap_or_default();
-    items.into_iter().find_map(|item| {
-        let id = item.get("id").and_then(|value| value.as_i64())?;
-        let project = ProviderProject {
-            id: id.to_string(),
-            slug: item
-                .get("slug")
-                .and_then(|value| value.as_str())
-                .map(str::to_string),
-            title: item
+    items
+        .into_iter()
+        .filter_map(|item| {
+            let id = item.get("id").and_then(|value| value.as_i64())?;
+            let title = item
                 .get("name")
                 .and_then(|value| value.as_str())
-                .map(str::to_string),
-            project_type: None,
-        };
-        provider_project_matches(&project, display_name).then_some(project)
+                .map(str::to_string)
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "Без названия".to_string());
+            let icon_url = item.get("logo").and_then(|logo| {
+                non_empty_json_string(logo.get("thumbnailUrl"))
+                    .or_else(|| non_empty_json_string(logo.get("url")))
+            });
+            Some(ProviderCandidate {
+                id: id.to_string(),
+                slug: item
+                    .get("slug")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                title,
+                icon_url,
+                match_score: 0,
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn list_curseforge_candidates(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    display_name: &str,
+) -> Vec<ProviderCandidate> {
+    if api_key.trim().is_empty() {
+        return Vec::new();
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut candidates = Vec::new();
+    for query_text in search_queries_for_api(display_name) {
+        for candidate in
+            fetch_curseforge_search_batch(client, api_key, &query_text, PROVIDER_SEARCH_LIMIT)
+        {
+            if seen.insert(candidate.id.clone()) {
+                candidates.push(candidate);
+            }
+        }
+        if candidates.len() >= PROVIDER_SEARCH_LIMIT {
+            break;
+        }
+    }
+    sort_candidates_by_relevance(display_name, &mut candidates);
+    candidates.truncate(PROVIDER_SEARCH_LIMIT);
+    candidates
+}
+
+pub(crate) fn curseforge_candidate_for_project(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    project_id: &str,
+) -> Option<ProviderCandidate> {
+    let payload = curseforge_get(client, api_key, &format!("mods/{project_id}"))?;
+    let data = payload.get("data")?;
+    let title = data
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "Без названия".to_string());
+    let icon_url = data.get("logo").and_then(|logo| {
+        non_empty_json_string(logo.get("thumbnailUrl"))
+            .or_else(|| non_empty_json_string(logo.get("url")))
+    });
+    Some(ProviderCandidate {
+        id: project_id.to_string(),
+        slug: data
+            .get("slug")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        title,
+        icon_url,
+        match_score: 0,
+    })
+}
+
+pub(crate) fn modrinth_candidate_for_project(
+    client: &reqwest::blocking::Client,
+    project_id: &str,
+) -> Option<ProviderCandidate> {
+    let payload = modrinth_project(client, project_id)?;
+    Some(ProviderCandidate {
+        id: project_id.to_string(),
+        slug: payload
+            .get("slug")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        title: payload
+            .get("title")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "Без названия".to_string()),
+        icon_url: non_empty_json_string(payload.get("icon_url")),
+        match_score: 0,
     })
 }
 
@@ -607,33 +870,4 @@ pub(crate) fn resolve_cover_url(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn project(title: &str, slug: &str, project_type: &str) -> ProviderProject {
-        ProviderProject {
-            id: slug.to_string(),
-            slug: Some(slug.to_string()),
-            title: Some(title.to_string()),
-            project_type: Some(project_type.to_string()),
-        }
-    }
-
-    #[test]
-    fn modrinth_match_accepts_exact_mod() {
-        let project = project("FTB Quests", "ftb-quests", "mod");
-        assert!(modrinth_project_matches(&project, "FTB Quests"));
-    }
-
-    #[test]
-    fn modrinth_match_rejects_resource_packs() {
-        let project = project("FTB Quests 中文翻译", "ftb-quests-zh_cn", "resourcepack");
-        assert!(!modrinth_project_matches(&project, "FTB Quests"));
-    }
-
-    #[test]
-    fn modrinth_match_rejects_similar_addons() {
-        let project = project("FTB Quests Freeze Fix", "ftb-quests-freeze-fix", "mod");
-        assert!(!modrinth_project_matches(&project, "FTB Quests"));
-    }
-}
+mod tests;
