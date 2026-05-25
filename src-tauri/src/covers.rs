@@ -165,7 +165,8 @@ pub(crate) fn apply_existing_cover(
     paths: &InstancePaths,
     catalog_root: Option<&Path>,
 ) {
-    let prefixes = cover_platform_prefixes(item.modrinth_id.as_deref(), item.curseforge_id.as_deref());
+    let prefixes =
+        cover_platform_prefixes(item.modrinth_id.as_deref(), item.curseforge_id.as_deref());
     let manual_hash = hash_cover_key(&item.key);
 
     let manual_dir = cover_dir(&paths.data_root, true);
@@ -211,11 +212,10 @@ pub(crate) fn delete_manual_cover(paths: &InstancePaths, key: &str) -> Result<bo
         if !has_cover_extension(&name) {
             continue;
         }
-        let matches_hash =
-            name.starts_with(&hash.to_ascii_lowercase()) && {
-                let suffix = name.trim_start_matches(&hash.to_ascii_lowercase());
-                suffix.starts_with('.') || suffix.starts_with('_')
-            };
+        let matches_hash = name.starts_with(&hash.to_ascii_lowercase()) && {
+            let suffix = name.trim_start_matches(&hash.to_ascii_lowercase());
+            suffix.starts_with('.') || suffix.starts_with('_')
+        };
         if matches_hash {
             let _ = std::fs::remove_file(entry.path());
             removed = true;

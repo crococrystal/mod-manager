@@ -3,14 +3,15 @@ use serde::Deserialize;
 use tauri::AppHandle;
 
 use crate::catalog;
-use crate::covers::{
-    cover_ext_from_mime, delete_manual_cover, store_uploaded_cover,
-};
+use crate::covers::{cover_ext_from_mime, delete_manual_cover, store_uploaded_cover};
 use crate::instance_registry;
 use crate::mods::{normalize_side, scan_mods_for_settings, stats_for, ModListPayload};
 use crate::mods_watch;
 use crate::prefetch::prefetch_mod_assets_for_settings;
-use crate::remote::{curseforge_search_mod, http_client, modrinth_search_project};
+use crate::remote::{
+    curseforge_search_mod, http_client, modrinth_project_info, modrinth_project_matches,
+    modrinth_search_project,
+};
 use crate::settings::{
     read_settings, remember_instance, resolve_paths, settings_view, write_settings, Settings,
     SettingsView,
@@ -64,10 +65,11 @@ pub(crate) async fn scan_mods(app: AppHandle) -> Result<ModListPayload, String> 
     let settings = read_settings(&app)?;
     let view = settings_view(&app, settings.clone())?;
     let catalog_root = catalog::catalog_root(&app).ok();
-    let mods =
-        tauri::async_runtime::spawn_blocking(move || scan_mods_for_settings(&settings, catalog_root))
-            .await
-            .map_err(|error| format!("Сканирование прервано: {error}"))??;
+    let mods = tauri::async_runtime::spawn_blocking(move || {
+        scan_mods_for_settings(&settings, catalog_root)
+    })
+    .await
+    .map_err(|error| format!("Сканирование прервано: {error}"))??;
     let stats = stats_for(&mods);
     Ok(ModListPayload {
         settings: view,
@@ -175,10 +177,11 @@ pub(crate) async fn update_mod_tags(
 
     let catalog_root = catalog::catalog_root(&app).ok();
     let view = settings_view(&app, settings.clone())?;
-    let mods =
-        tauri::async_runtime::spawn_blocking(move || scan_mods_for_settings(&settings, catalog_root))
-            .await
-            .map_err(|error| format!("Сканирование прервано: {error}"))??;
+    let mods = tauri::async_runtime::spawn_blocking(move || {
+        scan_mods_for_settings(&settings, catalog_root)
+    })
+    .await
+    .map_err(|error| format!("Сканирование прервано: {error}"))??;
     let stats = stats_for(&mods);
     Ok(ModListPayload {
         settings: view,
@@ -217,10 +220,26 @@ pub(crate) async fn switch_mod_source(
 
         match target.as_str() {
             "modrinth" => {
-                if !has_modrinth && tag.modrinth_id.trim().is_empty() {
-                    let project = modrinth_search_project(&client, &display_name)
-                        .ok_or_else(|| "Мод не найден на Modrinth.".to_string())?;
-                    tag.modrinth_id = project.id;
+                let existing_modrinth_id = tag.modrinth_id.trim().to_string();
+                let mut invalid_saved_modrinth = false;
+                if !existing_modrinth_id.is_empty() {
+                    let matches_saved = modrinth_project_info(&client, &existing_modrinth_id)
+                        .is_some_and(|project| modrinth_project_matches(&project, &display_name));
+                    if !matches_saved {
+                        tag.modrinth_id.clear();
+                        invalid_saved_modrinth = true;
+                    }
+                }
+                if (!has_modrinth || invalid_saved_modrinth) && tag.modrinth_id.trim().is_empty() {
+                    if let Some(project) = modrinth_search_project(&client, &display_name) {
+                        tag.modrinth_id = project.id;
+                    } else {
+                        if invalid_saved_modrinth {
+                            tags.updated_at = now_iso();
+                            write_tags(&paths.tags_path, &tags)?;
+                        }
+                        return Err("Мод не найден на Modrinth.".to_string());
+                    }
                 }
             }
             "curseforge" => {
@@ -228,12 +247,9 @@ pub(crate) async fn switch_mod_source(
                     if settings.curseforge_api_key.trim().is_empty() {
                         return Err("Для поиска на CurseForge нужен API key.".to_string());
                     }
-                    let project = curseforge_search_mod(
-                        &client,
-                        &settings.curseforge_api_key,
-                        &display_name,
-                    )
-                    .ok_or_else(|| "Мод не найден на CurseForge.".to_string())?;
+                    let project =
+                        curseforge_search_mod(&client, &settings.curseforge_api_key, &display_name)
+                            .ok_or_else(|| "Мод не найден на CurseForge.".to_string())?;
                     tag.curseforge_id = project.id;
                     tag.curseforge_slug = project.slug.unwrap_or_default();
                 }
@@ -289,10 +305,11 @@ pub(crate) async fn upload_cover(
 
     let catalog_root = catalog::catalog_root(&app).ok();
     let view = settings_view(&app, settings.clone())?;
-    let mods =
-        tauri::async_runtime::spawn_blocking(move || scan_mods_for_settings(&settings, catalog_root))
-            .await
-            .map_err(|error| format!("Сканирование прервано: {error}"))??;
+    let mods = tauri::async_runtime::spawn_blocking(move || {
+        scan_mods_for_settings(&settings, catalog_root)
+    })
+    .await
+    .map_err(|error| format!("Сканирование прервано: {error}"))??;
     let stats = stats_for(&mods);
     Ok(ModListPayload {
         settings: view,
@@ -312,10 +329,11 @@ pub(crate) async fn delete_custom_cover(
 
     let catalog_root = catalog::catalog_root(&app).ok();
     let view = settings_view(&app, settings.clone())?;
-    let mods =
-        tauri::async_runtime::spawn_blocking(move || scan_mods_for_settings(&settings, catalog_root))
-            .await
-            .map_err(|error| format!("Сканирование прервано: {error}"))??;
+    let mods = tauri::async_runtime::spawn_blocking(move || {
+        scan_mods_for_settings(&settings, catalog_root)
+    })
+    .await
+    .map_err(|error| format!("Сканирование прервано: {error}"))??;
     let stats = stats_for(&mods);
     Ok(ModListPayload {
         settings: view,
@@ -325,9 +343,7 @@ pub(crate) async fn delete_custom_cover(
 }
 
 #[tauri::command]
-pub(crate) fn clear_app_data(
-    app: AppHandle,
-) -> Result<instance_registry::ClearDataResult, String> {
+pub(crate) fn clear_app_data(app: AppHandle) -> Result<instance_registry::ClearDataResult, String> {
     let settings = read_settings(&app)?;
     let mut data_roots = Vec::new();
     if let Ok(paths) = resolve_paths(&settings) {

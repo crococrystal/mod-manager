@@ -7,6 +7,8 @@ use crate::settings::Settings;
 pub(crate) struct ProviderProject {
     pub id: String,
     pub slug: Option<String>,
+    pub title: Option<String>,
+    pub project_type: Option<String>,
 }
 
 pub(crate) fn http_client() -> Option<reqwest::blocking::Client> {
@@ -29,6 +31,104 @@ pub(crate) fn modrinth_project(
         .ok()?
         .json()
         .ok()
+}
+
+pub(crate) fn modrinth_project_info(
+    client: &reqwest::blocking::Client,
+    project_id: &str,
+) -> Option<ProviderProject> {
+    let payload = modrinth_project(client, project_id)?;
+    let id = payload
+        .get("id")
+        .or_else(|| payload.get("slug"))
+        .and_then(|value| value.as_str())?;
+    Some(ProviderProject {
+        id: id.to_string(),
+        slug: payload
+            .get("slug")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        title: payload
+            .get("title")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        project_type: payload
+            .get("project_type")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+    })
+}
+
+fn strip_qualifiers(value: &str) -> String {
+    let mut result = String::new();
+    let mut depth = 0u32;
+    for ch in value.chars() {
+        match ch {
+            '(' | '[' => depth = depth.saturating_add(1),
+            ')' | ']' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => result.push(ch),
+            _ => {}
+        }
+    }
+    result.trim().to_string()
+}
+
+fn normalized_match_key(value: &str) -> String {
+    value
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect()
+}
+
+fn slug_key(value: &str) -> String {
+    let mut result = String::new();
+    let mut previous_dash = false;
+    for ch in value.to_ascii_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() {
+            result.push(ch);
+            previous_dash = false;
+        } else if !previous_dash {
+            result.push('-');
+            previous_dash = true;
+        }
+    }
+    result.trim_matches('-').to_string()
+}
+
+pub(crate) fn provider_project_matches(project: &ProviderProject, display_name: &str) -> bool {
+    let clean = strip_qualifiers(display_name);
+    let mut name_keys = vec![normalized_match_key(display_name)];
+    let clean_key = normalized_match_key(&clean);
+    if !clean_key.is_empty() && !name_keys.contains(&clean_key) {
+        name_keys.push(clean_key);
+    }
+
+    if let Some(title) = project.title.as_deref() {
+        let title_key = normalized_match_key(title);
+        if !title_key.is_empty() && name_keys.contains(&title_key) {
+            return true;
+        }
+    }
+
+    let mut slug_keys = vec![slug_key(display_name)];
+    let clean_slug = slug_key(&clean);
+    if !clean_slug.is_empty() && !slug_keys.contains(&clean_slug) {
+        slug_keys.push(clean_slug);
+    }
+    project
+        .slug
+        .as_deref()
+        .map(slug_key)
+        .is_some_and(|slug| !slug.is_empty() && slug_keys.contains(&slug))
+}
+
+pub(crate) fn modrinth_project_matches(project: &ProviderProject, display_name: &str) -> bool {
+    project
+        .project_type
+        .as_deref()
+        .is_some_and(|kind| kind == "mod")
+        && provider_project_matches(project, display_name)
 }
 
 pub(crate) fn modrinth_version(
@@ -80,9 +180,10 @@ pub(crate) fn modrinth_search_icon(
     if query.is_empty() {
         return None;
     }
+    let facets = urlencoding::encode(r#"[["project_type:mod"]]"#);
     let payload = client
         .get(format!(
-            "https://api.modrinth.com/v2/search?query={query}&limit=1"
+            "https://api.modrinth.com/v2/search?query={query}&limit=10&index=relevance&facets={facets}"
         ))
         .send()
         .ok()?
@@ -93,8 +194,33 @@ pub(crate) fn modrinth_search_icon(
     payload
         .get("hits")
         .and_then(|hits| hits.as_array())
-        .and_then(|hits| hits.first())
-        .and_then(|hit| non_empty_json_string(hit.get("icon_url")))
+        .and_then(|hits| {
+            hits.iter().find_map(|hit| {
+                let project = ProviderProject {
+                    id: hit
+                        .get("project_id")
+                        .or_else(|| hit.get("slug"))
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    slug: hit
+                        .get("slug")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                    title: hit
+                        .get("title")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                    project_type: hit
+                        .get("project_type")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                };
+                modrinth_project_matches(&project, display_name)
+                    .then(|| non_empty_json_string(hit.get("icon_url")))
+                    .flatten()
+            })
+        })
 }
 
 pub(crate) fn modrinth_search_project(
@@ -105,9 +231,10 @@ pub(crate) fn modrinth_search_project(
     if query.is_empty() {
         return None;
     }
+    let facets = urlencoding::encode(r#"[["project_type:mod"]]"#);
     let payload = client
         .get(format!(
-            "https://api.modrinth.com/v2/search?query={query}&limit=1&index=relevance"
+            "https://api.modrinth.com/v2/search?query={query}&limit=10&index=relevance&facets={facets}"
         ))
         .send()
         .ok()?
@@ -115,20 +242,32 @@ pub(crate) fn modrinth_search_project(
         .ok()?
         .json::<serde_json::Value>()
         .ok()?;
-    let hit = payload
+    let hits = payload
         .get("hits")
         .and_then(|hits| hits.as_array())
-        .and_then(|hits| hits.first())?;
-    let id = hit
-        .get("project_id")
-        .or_else(|| hit.get("slug"))
-        .and_then(|value| value.as_str())?;
-    Some(ProviderProject {
-        id: id.to_string(),
-        slug: hit
-            .get("slug")
-            .and_then(|value| value.as_str())
-            .map(str::to_string),
+        .cloned()
+        .unwrap_or_default();
+    hits.into_iter().find_map(|hit| {
+        let id = hit
+            .get("project_id")
+            .or_else(|| hit.get("slug"))
+            .and_then(|value| value.as_str())?;
+        let project = ProviderProject {
+            id: id.to_string(),
+            slug: hit
+                .get("slug")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            title: hit
+                .get("title")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            project_type: hit
+                .get("project_type")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+        };
+        modrinth_project_matches(&project, display_name).then_some(project)
     })
 }
 
@@ -144,19 +283,28 @@ pub(crate) fn curseforge_search_mod(
     let payload = curseforge_get(
         client,
         api_key,
-        &format!("mods/search?gameId=432&classId=6&searchFilter={query}&pageSize=1"),
+        &format!("mods/search?gameId=432&classId=6&searchFilter={query}&pageSize=10"),
     )?;
-    let item = payload
+    let items = payload
         .get("data")
         .and_then(|data| data.as_array())
-        .and_then(|items| items.first())?;
-    let id = item.get("id").and_then(|value| value.as_i64())?;
-    Some(ProviderProject {
-        id: id.to_string(),
-        slug: item
-            .get("slug")
-            .and_then(|value| value.as_str())
-            .map(str::to_string),
+        .cloned()
+        .unwrap_or_default();
+    items.into_iter().find_map(|item| {
+        let id = item.get("id").and_then(|value| value.as_i64())?;
+        let project = ProviderProject {
+            id: id.to_string(),
+            slug: item
+                .get("slug")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            title: item
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map(str::to_string),
+            project_type: None,
+        };
+        provider_project_matches(&project, display_name).then_some(project)
     })
 }
 
@@ -174,7 +322,10 @@ pub(crate) fn fetch_api_dependencies(
     if !prefer_curseforge && item.modrinth_id.is_some() && settings.auto_prefetch_dependencies {
         if let Some(version_id) = item.modrinth_version_id.as_deref() {
             if let Some(payload) = modrinth_version(client, version_id) {
-                if let Some(deps) = payload.get("dependencies").and_then(|value| value.as_array()) {
+                if let Some(deps) = payload
+                    .get("dependencies")
+                    .and_then(|value| value.as_array())
+                {
                     for dep in deps {
                         let required = dep
                             .get("dependency_type")
@@ -234,7 +385,10 @@ pub(crate) fn fetch_api_dependencies(
         if item.modrinth_id.is_some() && settings.auto_prefetch_dependencies {
             if let Some(version_id) = item.modrinth_version_id.as_deref() {
                 if let Some(payload) = modrinth_version(client, version_id) {
-                    if let Some(deps) = payload.get("dependencies").and_then(|value| value.as_array()) {
+                    if let Some(deps) = payload
+                        .get("dependencies")
+                        .and_then(|value| value.as_array())
+                    {
                         for dep in deps {
                             let required = dep
                                 .get("dependency_type")
@@ -280,8 +434,8 @@ pub(crate) fn resolve_cover_url(
         }
     }
     if let Some(project_id) = item.curseforge_id.as_deref() {
-        if let Some(url) = curseforge_get(client, api_key, &format!("mods/{project_id}"))
-            .and_then(|payload| {
+        if let Some(url) =
+            curseforge_get(client, api_key, &format!("mods/{project_id}")).and_then(|payload| {
                 payload
                     .get("data")
                     .and_then(|data| data.get("logo"))
@@ -310,4 +464,36 @@ pub(crate) fn resolve_cover_url(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn project(title: &str, slug: &str, project_type: &str) -> ProviderProject {
+        ProviderProject {
+            id: slug.to_string(),
+            slug: Some(slug.to_string()),
+            title: Some(title.to_string()),
+            project_type: Some(project_type.to_string()),
+        }
+    }
+
+    #[test]
+    fn modrinth_match_accepts_exact_mod() {
+        let project = project("FTB Quests", "ftb-quests", "mod");
+        assert!(modrinth_project_matches(&project, "FTB Quests"));
+    }
+
+    #[test]
+    fn modrinth_match_rejects_resource_packs() {
+        let project = project("FTB Quests 中文翻译", "ftb-quests-zh_cn", "resourcepack");
+        assert!(!modrinth_project_matches(&project, "FTB Quests"));
+    }
+
+    #[test]
+    fn modrinth_match_rejects_similar_addons() {
+        let project = project("FTB Quests Freeze Fix", "ftb-quests-freeze-fix", "mod");
+        assert!(!modrinth_project_matches(&project, "FTB Quests"));
+    }
 }

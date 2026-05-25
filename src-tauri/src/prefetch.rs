@@ -30,11 +30,19 @@ pub(crate) fn prefetch_mod_assets_for_settings(
 
     let modrinth_lookup: HashMap<String, String> = mods
         .iter()
-        .filter_map(|item| item.modrinth_id.as_ref().map(|id| (id.clone(), item.key.clone())))
+        .filter_map(|item| {
+            item.modrinth_id
+                .as_ref()
+                .map(|id| (id.clone(), item.key.clone()))
+        })
         .collect();
     let curseforge_lookup: HashMap<String, String> = mods
         .iter()
-        .filter_map(|item| item.curseforge_id.as_ref().map(|id| (id.clone(), item.key.clone())))
+        .filter_map(|item| {
+            item.curseforge_id
+                .as_ref()
+                .map(|id| (id.clone(), item.key.clone()))
+        })
         .collect();
 
     let mut tags = read_tags(&paths.tags_path)?;

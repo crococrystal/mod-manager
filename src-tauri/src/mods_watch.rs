@@ -1,8 +1,4 @@
-use std::{
-    path::PathBuf,
-    sync::Mutex,
-    time::Duration,
-};
+use std::{path::PathBuf, sync::Mutex, time::Duration};
 
 use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};

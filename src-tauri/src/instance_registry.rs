@@ -125,15 +125,18 @@ pub fn mods_fingerprint(mods_dir: &Path) -> Result<String, String> {
 pub fn touch_opened(registry: &mut InstanceRegistry, instance_root: &Path, now: &str) {
     let key = registry_key(instance_root);
     let display_name = display_name_for(instance_root);
-    let record = registry.instances.entry(key).or_insert_with(|| InstanceRecord {
-        instance_root: instance_root.to_string_lossy().to_string(),
-        display_name: display_name.clone(),
-        mods_fingerprint: String::new(),
-        covers_ready: false,
-        dependencies_ready: false,
-        last_prepared_at: String::new(),
-        last_opened_at: now.to_string(),
-    });
+    let record = registry
+        .instances
+        .entry(key)
+        .or_insert_with(|| InstanceRecord {
+            instance_root: instance_root.to_string_lossy().to_string(),
+            display_name: display_name.clone(),
+            mods_fingerprint: String::new(),
+            covers_ready: false,
+            dependencies_ready: false,
+            last_prepared_at: String::new(),
+            last_opened_at: now.to_string(),
+        });
     record.instance_root = instance_root.to_string_lossy().to_string();
     record.display_name = display_name;
     record.last_opened_at = now.to_string();
@@ -163,11 +166,10 @@ pub fn cache_status(
         .map(|item| item.mods_fingerprint != mods_fingerprint)
         .unwrap_or(true);
 
-    let covers_ready = record.map(|item| item.covers_ready).unwrap_or(false) && !fingerprint_changed;
-    let dependencies_ready = record
-        .map(|item| item.dependencies_ready)
-        .unwrap_or(false)
-        && !fingerprint_changed;
+    let covers_ready =
+        record.map(|item| item.covers_ready).unwrap_or(false) && !fingerprint_changed;
+    let dependencies_ready =
+        record.map(|item| item.dependencies_ready).unwrap_or(false) && !fingerprint_changed;
 
     InstanceCacheStatus {
         instance_root: Some(root.to_string_lossy().to_string()),
@@ -203,15 +205,18 @@ pub fn mark_prepared(
     now: &str,
 ) {
     let key = registry_key(instance_root);
-    let record = registry.instances.entry(key).or_insert_with(|| InstanceRecord {
-        instance_root: instance_root.to_string_lossy().to_string(),
-        display_name: display_name_for(instance_root),
-        mods_fingerprint: String::new(),
-        covers_ready: false,
-        dependencies_ready: false,
-        last_prepared_at: String::new(),
-        last_opened_at: now.to_string(),
-    });
+    let record = registry
+        .instances
+        .entry(key)
+        .or_insert_with(|| InstanceRecord {
+            instance_root: instance_root.to_string_lossy().to_string(),
+            display_name: display_name_for(instance_root),
+            mods_fingerprint: String::new(),
+            covers_ready: false,
+            dependencies_ready: false,
+            last_prepared_at: String::new(),
+            last_opened_at: now.to_string(),
+        });
     record.mods_fingerprint = mods_fingerprint.to_string();
     if covers {
         record.covers_ready = true;
@@ -223,7 +228,10 @@ pub fn mark_prepared(
     record.last_opened_at = now.to_string();
 }
 
-pub fn clear_all(app: &AppHandle, extra_data_roots: Vec<PathBuf>) -> Result<ClearDataResult, String> {
+pub fn clear_all(
+    app: &AppHandle,
+    extra_data_roots: Vec<PathBuf>,
+) -> Result<ClearDataResult, String> {
     let registry = read_registry(app)?;
     let cleared_instances = registry.instances.len() as u32;
     let mut cleared_instance_dirs = 0u32;

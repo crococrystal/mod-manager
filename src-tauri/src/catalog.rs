@@ -19,7 +19,10 @@ pub fn catalog_root(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// Стабильный ключ кэша по ID платформы (как mod-panel: modrinth-… / curseforge-…).
 #[allow(dead_code)]
-pub fn cover_cache_prefix(modrinth_id: Option<&str>, curseforge_id: Option<&str>) -> Option<String> {
+pub fn cover_cache_prefix(
+    modrinth_id: Option<&str>,
+    curseforge_id: Option<&str>,
+) -> Option<String> {
     if let Some(id) = modrinth_id.filter(|s| !s.is_empty()) {
         return Some(format!("modrinth-{id}"));
     }
@@ -43,7 +46,9 @@ pub fn find_catalog_cover(root: &Path, prefix: &str) -> Option<PathBuf> {
         }
         let suffix = name.strip_prefix(&needle)?;
         if suffix.starts_with('.') || suffix.starts_with('_') {
-            let ext = Path::new(&name).extension().and_then(|value| value.to_str())?;
+            let ext = Path::new(&name)
+                .extension()
+                .and_then(|value| value.to_str())?;
             if matches!(ext, "png" | "jpg" | "jpeg" | "webp" | "gif") {
                 return Some(entry.path());
             }
@@ -52,7 +57,12 @@ pub fn find_catalog_cover(root: &Path, prefix: &str) -> Option<PathBuf> {
     None
 }
 
-pub fn save_catalog_cover(root: &Path, prefix: &str, bytes: &[u8], ext: &str) -> Result<PathBuf, String> {
+pub fn save_catalog_cover(
+    root: &Path,
+    prefix: &str,
+    bytes: &[u8],
+    ext: &str,
+) -> Result<PathBuf, String> {
     let dir = root.join("covers");
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     for old in COVER_EXTENSIONS {

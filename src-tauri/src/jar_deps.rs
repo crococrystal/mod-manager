@@ -1,11 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    fs,
-    path::Path,
-    process::Command,
-    time::SystemTime,
-};
+use std::{collections::HashMap, fs, path::Path, process::Command, time::SystemTime};
 
 const SKIP_MOD_IDS: &[&str] = &[
     "minecraft",
@@ -149,7 +143,11 @@ pub fn build_registry(mods: &[ModRef]) -> HashMap<String, String> {
     registry
 }
 
-fn resolve_mod_id(mod_id: &str, registry: &HashMap<String, String>, mods: &[ModRef]) -> Option<String> {
+fn resolve_mod_id(
+    mod_id: &str,
+    registry: &HashMap<String, String>,
+    mods: &[ModRef],
+) -> Option<String> {
     let lower = mod_id.to_ascii_lowercase();
     if let Some(key) = registry.get(&lower) {
         return Some(key.clone());

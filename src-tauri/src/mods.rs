@@ -184,7 +184,11 @@ fn clean_tag_value(value: &str) -> Option<String> {
     }
 }
 
-fn source_url(source: &str, modrinth_id: Option<&str>, curseforge_slug: Option<&str>) -> Option<String> {
+fn source_url(
+    source: &str,
+    modrinth_id: Option<&str>,
+    curseforge_slug: Option<&str>,
+) -> Option<String> {
     match source {
         "modrinth" => modrinth_id.map(|id| format!("https://modrinth.com/mod/{id}")),
         "curseforge" => curseforge_slug
@@ -233,12 +237,7 @@ fn attach_used_by(mods: &mut [ModEntry]) {
 
     for item in mods.iter_mut() {
         let mut used = buckets.remove(&item.key).unwrap_or_default();
-        used.sort_by(|a, b| {
-            names
-                .get(a)
-                .unwrap_or(a)
-                .cmp(names.get(b).unwrap_or(b))
-        });
+        used.sort_by(|a, b| names.get(a).unwrap_or(a).cmp(names.get(b).unwrap_or(b)));
         item.used_by = used;
     }
 }
