@@ -22,6 +22,8 @@ pub(crate) struct Settings {
     pub auto_prefetch_covers: bool,
     #[serde(default = "default_true")]
     pub auto_prefetch_dependencies: bool,
+    #[serde(default = "default_true")]
+    pub auto_check_updates: bool,
     #[serde(default)]
     pub recent_instances: Vec<String>,
 }
@@ -33,6 +35,7 @@ impl Default for Settings {
             curseforge_api_key: String::new(),
             auto_prefetch_covers: true,
             auto_prefetch_dependencies: true,
+            auto_check_updates: true,
             recent_instances: Vec::new(),
         }
     }
@@ -48,6 +51,7 @@ pub(crate) struct SettingsView {
     pub curseforge_api_key_set: bool,
     pub auto_prefetch_covers: bool,
     pub auto_prefetch_dependencies: bool,
+    pub auto_check_updates: bool,
     pub recent_instances: Vec<String>,
     pub cache_status: Option<instance_registry::InstanceCacheStatus>,
 }
@@ -160,6 +164,7 @@ pub(crate) fn settings_view(app: &AppHandle, settings: Settings) -> Result<Setti
         curseforge_api_key_set: !settings.curseforge_api_key.trim().is_empty(),
         auto_prefetch_covers: settings.auto_prefetch_covers,
         auto_prefetch_dependencies: settings.auto_prefetch_dependencies,
+        auto_check_updates: settings.auto_check_updates,
         recent_instances: settings.recent_instances.clone(),
         cache_status,
     })

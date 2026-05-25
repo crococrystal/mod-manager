@@ -1,13 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Folder, FolderOpen, Info, RefreshCw, Trash2 } from 'lucide-react';
-import { getVersion } from '@tauri-apps/api/app';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Button } from '../../components/Button.jsx';
 import { Modal } from '../../components/Modal.jsx';
 import { NoticeModal } from '../../components/NoticeModal.jsx';
 import { clearAppData } from '../../api.js';
-import { canCheckForUpdates, checkForAppUpdate, formatUpdateError, installAppUpdate } from '../../lib/updater.js';
+import { canCheckForUpdates } from '../../lib/updater.js';
 
 function toSettings(draft) {
   return {
@@ -15,6 +14,7 @@ function toSettings(draft) {
     curseforgeApiKey: draft.curseforgeApiKey ?? '',
     autoPrefetchCovers: true,
     autoPrefetchDependencies: true,
+    autoCheckUpdates: draft.autoCheckUpdates ?? true,
     recentInstances: draft.recentInstances ?? []
   };
 }
@@ -33,16 +33,17 @@ function instanceNameFromPath(path) {
   return parts[parts.length - 1] || path;
 }
 
-export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
+function updateProgressLabel(progress) {
+  if (progress?.phase === 'install') return 'Установка…';
+  if (progress?.percent != null) return `Загрузка ${progress.percent}%`;
+  return 'Загрузка…';
+}
+
+export function SettingsDialog({ settings, busy, onClose, onSave, onCleared, updater }) {
   const [draft, setDraft] = useState(() => settings ?? {});
   const [message, setMessage] = useState('');
   const [clearConfirm, setClearConfirm] = useState(null);
   const [clearing, setClearing] = useState(false);
-  const [appVersion, setAppVersion] = useState('');
-  const [updateStatus, setUpdateStatus] = useState('idle');
-  const [updateNotice, setUpdateNotice] = useState(null);
-  const [updateProgress, setUpdateProgress] = useState(null);
-  const updateNoticeTimerRef = useRef(null);
 
   const packLocked = busy || clearing;
   const recent = useMemo(() => {
@@ -50,61 +51,21 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
     return list.filter((item) => item && item !== draft.instanceRoot);
   }, [settings, draft.instanceRoot]);
 
+  const updateStatus = updater?.status ?? 'idle';
+  const updateProgress = updater?.progress ?? null;
+  const updateNotice = updater?.notice ?? null;
+  const appVersion = updater?.appVersion ?? '';
+  const updateBusy = updater?.updateBusy ?? false;
+
   useEffect(() => {
     setDraft(settings ?? {});
   }, [settings]);
 
-  useEffect(() => {
-    if (!canCheckForUpdates()) return;
-    void getVersion()
-      .then((version) => setAppVersion(version))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => () => {
-    if (updateNoticeTimerRef.current) clearTimeout(updateNoticeTimerRef.current);
-  }, []);
-
-  function clearUpdateNoticeTimer() {
-    if (!updateNoticeTimerRef.current) return;
-    clearTimeout(updateNoticeTimerRef.current);
-    updateNoticeTimerRef.current = null;
+  async function handleManualUpdate() {
+    if (!updater) return;
+    await updater.checkAndInstall({ silent: false });
   }
 
-  function showUpToDateNotice() {
-    clearUpdateNoticeTimer();
-    setUpdateNotice({ tone: 'ok', text: 'У вас актуальная версия' });
-    updateNoticeTimerRef.current = setTimeout(() => {
-      setUpdateNotice(null);
-      updateNoticeTimerRef.current = null;
-    }, 3000);
-  }
-
-  async function checkUpdates() {
-    if (!canCheckForUpdates()) return;
-    setUpdateStatus('checking');
-    clearUpdateNoticeTimer();
-    setUpdateNotice(null);
-    setUpdateProgress(null);
-    try {
-      const update = await checkForAppUpdate();
-      if (!update) {
-        setUpdateStatus('idle');
-        showUpToDateNotice();
-        return;
-      }
-      setUpdateStatus('installing');
-      await installAppUpdate(update, (progress) => {
-        setUpdateProgress(progress);
-      });
-    } catch (err) {
-      setUpdateStatus('idle');
-      setUpdateProgress(null);
-      setUpdateNotice({ tone: 'error', text: formatUpdateError(err) });
-    }
-  }
-
-  const updateBusy = updateStatus === 'checking' || updateStatus === 'installing';
   const updateLabel =
     updateStatus === 'checking'
       ? '…'
@@ -113,12 +74,6 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
           ? 'Установка'
           : 'Загрузка'
         : 'Обновить';
-
-  function updateProgressLabel() {
-    if (updateProgress?.phase === 'install') return 'Установка…';
-    if (updateProgress?.percent != null) return `Загрузка ${updateProgress.percent}%`;
-    return 'Загрузка…';
-  }
 
   async function pickFolder() {
     const selected = await open({
@@ -168,6 +123,13 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
     } finally {
       setClearing(false);
     }
+  }
+
+  async function saveAutoCheckUpdates(enabled) {
+    const next = { ...draft, autoCheckUpdates: enabled };
+    setDraft(next);
+    setMessage('');
+    await onSave(toSettings(next), { bootstrap: false, scan: false });
   }
 
   const uiBusy = packLocked || updateBusy;
@@ -263,44 +225,56 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared }) {
         ) : null}
 
         {canCheckForUpdates() ? (
-          <div className={`settingsUpdateBar${updateStatus === 'installing' ? ' settingsUpdateBar--busy' : ''}`}>
-            <div className="settingsUpdateMain">
-              {updateStatus === 'installing' ? (
-                <>
-                  <span className="settingsUpdateVersion settingsUpdateVersion--progress">
-                    {updateProgressLabel()}
+          <>
+            <label className="settingsToggleRow">
+              <span>Автообновление</span>
+              <input
+                type="checkbox"
+                checked={draft.autoCheckUpdates ?? true}
+                disabled={packLocked}
+                onChange={(event) => saveAutoCheckUpdates(event.target.checked)}
+              />
+            </label>
+
+            <div className={`settingsUpdateBar${updateStatus === 'installing' ? ' settingsUpdateBar--busy' : ''}`}>
+              <div className="settingsUpdateMain">
+                {updateStatus === 'installing' ? (
+                  <>
+                    <span className="settingsUpdateVersion settingsUpdateVersion--progress">
+                      {updateProgressLabel(updateProgress)}
+                    </span>
+                    <div className="settingsUpdateProgressTrack" aria-hidden="true">
+                      <div
+                        className={`settingsUpdateProgressBar${updateProgress?.percent == null ? ' indeterminate' : ''}`}
+                        style={
+                          updateProgress?.percent != null
+                            ? { width: `${updateProgress.percent}%` }
+                            : undefined
+                        }
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <span
+                    className={[
+                      'settingsUpdateVersion',
+                      updateNotice ? `settingsUpdateVersion--${updateNotice.tone}` : ''
+                    ].filter(Boolean).join(' ')}
+                  >
+                    {updateNotice ? updateNotice.text : (appVersion || '—')}
                   </span>
-                  <div className="settingsUpdateProgressTrack" aria-hidden="true">
-                    <div
-                      className={`settingsUpdateProgressBar${updateProgress?.percent == null ? ' indeterminate' : ''}`}
-                      style={
-                        updateProgress?.percent != null
-                          ? { width: `${updateProgress.percent}%` }
-                          : undefined
-                      }
-                    />
-                  </div>
-                </>
-              ) : (
-                <span
-                  className={[
-                    'settingsUpdateVersion',
-                    updateNotice ? `settingsUpdateVersion--${updateNotice.tone}` : ''
-                  ].filter(Boolean).join(' ')}
-                >
-                  {updateNotice ? updateNotice.text : (appVersion || '—')}
-                </span>
-              )}
+                )}
+              </div>
+              <button
+                type="button"
+                className="settingsUpdateAction"
+                onClick={handleManualUpdate}
+                disabled={uiBusy}
+              >
+                {updateLabel}
+              </button>
             </div>
-            <button
-              type="button"
-              className="settingsUpdateAction"
-              onClick={checkUpdates}
-              disabled={uiBusy}
-            >
-              {updateLabel}
-            </button>
-          </div>
+          </>
         ) : null}
 
         {message ? <p className="settingsMessage">{message}</p> : null}

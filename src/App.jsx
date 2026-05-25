@@ -15,6 +15,7 @@ import {
 import { IconButton } from './components/Button.jsx';
 import { TitleBar } from './components/TitleBar.jsx';
 import { NoticeModal } from './components/NoticeModal.jsx';
+import { UpdateModal } from './components/UpdateModal.jsx';
 import { DescriptionDialog } from './features/mods/DescriptionDialog.jsx';
 import { ModEditor } from './features/mods/ModEditor.jsx';
 import { ModTable } from './features/mods/ModTable.jsx';
@@ -22,6 +23,8 @@ import { ProviderDialog } from './features/mods/ProviderDialog.jsx';
 import { TagsDialog } from './features/mods/TagsDialog.jsx';
 import { VersionDialog } from './features/mods/VersionDialog.jsx';
 import { SettingsDialog } from './features/settings/SettingsDialog.jsx';
+import { useAppUpdater } from './hooks/useAppUpdater.js';
+import { canCheckForUpdates } from './lib/updater.js';
 import { filters } from './lib/modMeta.jsx';
 import { normalizeModsGraph } from './lib/usedBy.js';
 import './styles/index.css';
@@ -177,6 +180,8 @@ function App() {
   const watcherReloadPendingRef = useRef(false);
   const selectionAnchorRef = useRef(null);
   const bootstrapRunRef = useRef(0);
+  const startupUpdateCheckedRef = useRef(false);
+  const updater = useAppUpdater();
 
   const mods = payload?.mods ?? EMPTY_MODS;
   const stats = payload?.stats ?? EMPTY_STATS;
@@ -296,6 +301,14 @@ function App() {
       })
       .catch((err) => setError(String(err)));
   }, [loadSettings, runBootstrap]);
+
+  useEffect(() => {
+    if (!settings || startupUpdateCheckedRef.current) return;
+    startupUpdateCheckedRef.current = true;
+    if (settings.autoCheckUpdates === false) return;
+    if (!canCheckForUpdates()) return;
+    void updater.check({ silent: true });
+  }, [settings, updater]);
 
   useEffect(() => {
     if (!visible.length) {
@@ -816,6 +829,7 @@ function App() {
         <SettingsDialog
           settings={settings}
           busy={uiLocked}
+          updater={updater}
           onClose={() => setSettingsOpen(false)}
           onSave={handleSaveSettings}
           onCleared={async () => {
@@ -826,6 +840,18 @@ function App() {
               void runBootstrap(next.cacheStatus, { force: true });
             }
           }}
+        />
+      ) : null}
+
+      {updater.showUpdateModal ? (
+        <UpdateModal
+          currentVersion={updater.pendingUpdate?.currentVersion ?? updater.appVersion}
+          version={updater.pendingUpdate?.version}
+          status={updater.status}
+          progress={updater.progress}
+          error={updater.error}
+          onInstall={updater.install}
+          onDismiss={updater.dismissModal}
         />
       ) : null}
 

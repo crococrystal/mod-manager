@@ -496,6 +496,74 @@ h1 {
   min-height: 36px;
 }
 
+.noticeToastUpdate {
+  width: min(340px, calc(100vw - 32px));
+}
+
+.noticeToastTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.noticeToastHint {
+  margin: 0;
+  color: #aeb6bb;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.noticeToastError {
+  margin: 0;
+  color: #f0a8a8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.noticeToastProgressTrack {
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.08);
+  overflow: hidden;
+}
+
+.noticeToastProgressBar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #3d7ea6, #5c9fd6);
+  transition: width 0.15s ease;
+}
+
+.noticeToastProgressBar.indeterminate {
+  width: 36% !important;
+  animation: settingsUpdateIndeterminate 1.1s ease-in-out infinite;
+}
+
+.settingsToggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #12181b;
+  color: #dbe2e5;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settingsToggleRow input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #5c9fd6;
+  cursor: pointer;
+}
+
 @keyframes noticeToastIn {
   from {
     opacity: 0;
