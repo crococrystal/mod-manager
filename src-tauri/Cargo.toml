@@ -1,6 +1,6 @@
 [package]
 name = "mod-manager"
-version = "0.3.2"
+version = "0.3.3"
 description = "Native Minecraft modpack manager"
 authors = ["crococrystal"]
 edition = "2021"
