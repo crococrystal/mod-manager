@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/mod-manager-cover.png" alt="Mod Manager — manage Minecraft modpack tags, dependencies and versions" width="100%">
+</p>
+
 # Mod Manager
 
 Native Tauri desktop app for keeping Minecraft modpack metadata outside jar
