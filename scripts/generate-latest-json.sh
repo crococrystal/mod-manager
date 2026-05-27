@@ -43,7 +43,7 @@ if [ -n "$win_bundle" ] && [ -f "${win_bundle}.sig" ]; then
     '$current + {"windows-x86_64": {url: $url, signature: $signature}}')"
 fi
 
-linux_bundle="$(find "$artifacts_dir" -type f -name '*.AppImage.tar.gz' ! -name '*.sig' 2>/dev/null | head -n 1 || true)"
+linux_bundle="$(find "$artifacts_dir" -type f -name '*.AppImage' ! -name '*.sig' 2>/dev/null | head -n 1 || true)"
 if [ -n "$linux_bundle" ] && [ -f "${linux_bundle}.sig" ]; then
   linux_name="$(basename "$linux_bundle")"
   linux_sig="$(read_signature "${linux_bundle}.sig")"
