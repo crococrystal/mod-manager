@@ -40,8 +40,24 @@ body {
   isolation: isolate;
 }
 
+/* На Windows 11 DWM сам рисует чёткое 8px-скругление и согласованную с ним
+   тень. Чтобы наш фон не "торчал" из-под системного скругления, мы
+   подгоняем CSS-радиус под системный и дополнительно clip-path-им frame —
+   так Chromium точно не оставит зубчатых краёв на углах. */
+html.platform-windows {
+  --window-radius: 8px;
+}
+
+html.platform-windows .windowFrame {
+  clip-path: inset(0 round var(--window-radius));
+}
+
 .windowFrame.isMaximized {
   border-radius: 0;
+}
+
+html.platform-windows .windowFrame.isMaximized {
+  clip-path: none;
 }
 
 .windowFrame.isMaximized .appModalRoot {

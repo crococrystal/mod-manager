@@ -327,12 +327,17 @@ pub(crate) async fn bootstrap_instance(
                 !plan_dependencies || !settings.auto_prefetch_dependencies;
 
             if run_covers || run_dependencies {
+                // Метки тянем заодно при первом открытии сборки —
+                // batch-эндпоинты бесплатные, а пользователь сразу видит side / library / tech.
+                // only_missing_labels гарантирует, что повторные открытия не перезаписывают
+                // уже скачанные метки.
                 let flags = SyncFlags {
-                    labels: false,
+                    labels: true,
                     covers: run_covers,
                     dependencies: run_dependencies,
                     force_covers: false,
                     force_labels: false,
+                    only_missing_labels: true,
                 };
                 sync_mods_unified(&settings, &app_handle, flags, Some(bootstrap_token))?;
                 if run_covers {
@@ -730,6 +735,7 @@ pub(crate) async fn sync_provider_data(
                 dependencies: request.assets,
                 force_covers: request.assets,
                 force_labels: request.labels,
+                only_missing_labels: false,
             };
             let unified =
                 sync_mods_unified(&settings, &app_handle, flags, Some(task_token))?;

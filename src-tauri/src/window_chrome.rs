@@ -57,7 +57,7 @@ pub fn apply_windows_dwm_chrome(window: &WebviewWindow) {
     use std::ffi::c_void;
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     };
 
     let Ok(hwnd) = window.hwnd() else {
@@ -66,7 +66,7 @@ pub fn apply_windows_dwm_chrome(window: &WebviewWindow) {
     let hwnd: HWND = hwnd.0 as HWND;
 
     unsafe {
-        // DWMWA_COLOR_NONE = 0xFFFFFFFE — DWM не рисует системную рамку поверх borderless-окна.
+        // DWMWA_COLOR_NONE = 0xFFFFFFFE — DWM не рисует системную 1px рамку поверх borderless-окна.
         let no_border: u32 = 0xFFFF_FFFE;
         let _ = DwmSetWindowAttribute(
             hwnd,
@@ -75,8 +75,10 @@ pub fn apply_windows_dwm_chrome(window: &WebviewWindow) {
             std::mem::size_of::<u32>() as u32,
         );
 
-        // DWMWCP_DONOTROUND = 1 — система не скругляет углы, чтобы они совпадали с CSS border-radius.
-        let preference: u32 = DWMWCP_DONOTROUND as u32;
+        // DWMWCP_ROUND = 2 — система рисует чёткое скругление окна (Win 11+).
+        // Системная тень DWM согласована с этим скруглением, поэтому артефактов на углах
+        // не возникает. Наш CSS border-radius на Windows подгоняется под этот размер.
+        let preference: u32 = DWMWCP_ROUND as u32;
         let _ = DwmSetWindowAttribute(
             hwnd,
             DWMWA_WINDOW_CORNER_PREFERENCE as u32,

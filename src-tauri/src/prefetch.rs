@@ -120,6 +120,11 @@ pub(crate) struct SyncFlags {
     pub dependencies: bool,
     pub force_covers: bool,
     pub force_labels: bool,
+    /// Если true — пропускаем сохранение меток для модов, у которых
+    /// `provider_labels.fetched_at` уже не пустой. Применяется на bootstrap'е,
+    /// чтобы первое открытие сборки автоматически подтянуло метки, но
+    /// повторные открытия не делали лишней работы.
+    pub only_missing_labels: bool,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -341,7 +346,16 @@ pub(crate) fn sync_mods_unified(
         let mut tag_dirty = false;
 
         if flags.labels {
-            let active_source = if prefer_curseforge && has_curseforge {
+            let already_fetched = flags.only_missing_labels
+                && tags
+                    .mods
+                    .get(&item.key)
+                    .map(|tag| !tag.provider_labels.fetched_at.is_empty())
+                    .unwrap_or(false);
+
+            let active_source = if already_fetched {
+                ""
+            } else if prefer_curseforge && has_curseforge {
                 "curseforge"
             } else if has_modrinth {
                 "modrinth"

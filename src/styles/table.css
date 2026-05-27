@@ -60,7 +60,16 @@ tbody tr.selected {
 
 th:nth-child(1),
 td:nth-child(1) {
-  width: 86px;
+  width: 104px;
+}
+
+td:nth-child(1) {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.tagMark {
+  flex-shrink: 0;
 }
 
 th:nth-child(2),
