@@ -17,7 +17,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      version: ${{ steps.check.outputs.version }}
+      released_version: ${{ steps.check.outputs.released_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare current version with published release
+        id: check
+        env:
+          RELEASES_REPO: ${{ env.RELEASES_REPO }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+
+          current=$(node -p "require('./package.json').version")
+          tauri_ver=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          cargo_ver=$(grep -E '^version = ' src-tauri/Cargo.toml | head -n1 | sed -E 's/version = "(.*)"/\1/')
+          echo "version=${current}" >> "$GITHUB_OUTPUT"
+          echo "Versions — package.json: ${current}, tauri.conf.json: ${tauri_ver}, Cargo.toml: ${cargo_ver}"
+
+          if [ "${current}" != "${tauri_ver}" ] || [ "${current}" != "${cargo_ver}" ]; then
+            echo "::error::Версии не совпадают: package.json=${current}, tauri.conf.json=${tauri_ver}, Cargo.toml=${cargo_ver}. Подними версию во всех трёх файлах."
+            exit 1
+          fi
+
+          # Ручной запуск и теги всегда собираются — там пользователь явно
+          # сказал, что хочет билд (даже если версии совпадают).
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ] || [[ "${REF}" == refs/tags/* ]]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "Ручной запуск / тег — собираем без проверки версии."
+            exit 0
+          fi
+
+          # Версии из латеста в releases repo (через latest.json).
+          released=""
+          if curl -fsSL -o /tmp/latest.json \
+              "https://github.com/${RELEASES_REPO}/releases/download/latest/latest.json"; then
+            released=$(jq -r '.version // empty' /tmp/latest.json 2>/dev/null || true)
+          fi
+          echo "released_version=${released}" >> "$GITHUB_OUTPUT"
+          echo "Released version: ${released:-<none>}"
+
+          if [ -z "${released}" ]; then
+            echo "В releases repo нет latest.json — собираем как первый раз."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # current <= released → пропускаем (версия не повышена, обновления не будет).
+          if [ "${current}" = "${released}" ]; then
+            echo "::warning::Версия ${current} уже опубликована в latest. Сборка пропущена — забыли поднять версию в package.json / tauri.conf.json / Cargo.toml."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if printf '%s\n%s\n' "${current}" "${released}" | sort -V -C; then
+            echo "::warning::Текущая версия ${current} ниже опубликованной ${released}. Сборка пропущена."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Версия повышена: ${released} → ${current}. Собираем релиз."
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: preflight
+    if: needs.preflight.outputs.should_release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -85,8 +154,8 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: build
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    needs: [preflight, build]
+    if: needs.preflight.outputs.should_release == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
