@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Mod Manager",
-  "version": "0.5.1",
+  "mainBinaryName": "Mod Manager",
+  "version": "0.5.2",
   "identifier": "app.mod-manager",
   "build": {
     "beforeDevCommand": "npm run dev",
