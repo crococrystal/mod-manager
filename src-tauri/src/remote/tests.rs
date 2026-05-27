@@ -134,6 +134,7 @@ fn candidate_rank_prefers_ftb_teams() {
             slug: Some("shadows-of-evil".to_string()),
             title: "Shadows Of Evil".to_string(),
             icon_url: None,
+            exact_file_match: false,
             match_score: 0,
         },
         ProviderCandidate {
@@ -141,6 +142,7 @@ fn candidate_rank_prefers_ftb_teams() {
             slug: Some("ftb-teams".to_string()),
             title: "FTB Teams".to_string(),
             icon_url: None,
+            exact_file_match: false,
             match_score: 0,
         },
     ];

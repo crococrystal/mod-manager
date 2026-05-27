@@ -190,12 +190,14 @@ fn lookup_fingerprint_blocking(
                 &settings.curseforge_api_key,
                 &found.project_id,
             )?;
+            candidate.exact_file_match = true;
             candidate.match_score = 1000;
             Some(candidate)
         }
         "modrinth" => {
             let found = modrinth_version_by_sha512(&client, &identity.sha512)?;
             let mut candidate = modrinth_candidate_for_project(&client, &found.project_id)?;
+            candidate.exact_file_match = true;
             candidate.match_score = 1000;
             Some(candidate)
         }

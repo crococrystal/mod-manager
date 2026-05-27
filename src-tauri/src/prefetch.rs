@@ -37,7 +37,7 @@ pub(crate) fn identify_unknown_sources(
 ) -> Result<bool, String> {
     let mut pending = Vec::new();
     for item in mods {
-        if item.modrinth_id.is_some() || item.curseforge_id.is_some() {
+        if matches!(item.source.as_str(), "modrinth" | "curseforge") {
             continue;
         }
         let identity = read_file_identity(&paths.mods_dir.join(&item.filename))?;

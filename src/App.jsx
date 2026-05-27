@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Search, Settings, SlidersHorizontal } from 'lucide-react';
+import { Link2, Search, Settings, SlidersHorizontal } from 'lucide-react';
 import {
   bootstrapInstance,
   copyModFiles,
@@ -64,6 +64,23 @@ function withLocalCovers(next) {
   }));
   normalizeModsGraph(mods);
   return { ...next, mods };
+}
+
+function refreshedAssetsPatch(result) {
+  const patch = {
+    dependencies: result.dependencies ?? [],
+    resolvedDependencies: result.resolvedDependencies ?? result.dependencies ?? []
+  };
+  if (result.coverPath) {
+    patch.coverPath = result.coverPath;
+    patch.coverModifiedAt = result.coverModifiedAt ?? null;
+    patch.coverManual = false;
+    patch.coverUrl = coverUrlFor({
+      coverPath: result.coverPath,
+      coverModifiedAt: result.coverModifiedAt
+    });
+  }
+  return patch;
 }
 
 function isTextEntryTarget(target) {
@@ -178,6 +195,7 @@ function App() {
   const [tagsSavingKey, setTagsSavingKey] = useState(null);
   const [descriptionKey, setDescriptionKey] = useState(null);
   const [refreshingAssetsKey, setRefreshingAssetsKey] = useState(null);
+  const [identifyingSources, setIdentifyingSources] = useState(false);
   const [sort, setSort] = useState({ key: 'name', direction: 'asc' });
   const watcherReloadingRef = useRef(false);
   const watcherReloadPendingRef = useRef(false);
@@ -525,6 +543,56 @@ function App() {
     [applyPayload, runBootstrap, settings?.curseforgeApiKey, settings?.instanceRoot]
   );
 
+  const handleIdentifySources = useCallback(async () => {
+    const pendingKeys = new Set(
+      (payload?.mods ?? [])
+        .filter((mod) => mod.source === 'manual' || mod.source === 'index')
+        .map((mod) => mod.key)
+    );
+    setIdentifyingSources(true);
+    setError('');
+    try {
+      const next = await identifyModSources();
+      const linkedMods = (next.mods ?? []).filter(
+        (mod) =>
+          pendingKeys.has(mod.key) && (mod.source === 'modrinth' || mod.source === 'curseforge')
+      );
+      applyPayload(next);
+      const missingCoverMods = linkedMods.filter(
+        (mod) => !mod.coverManual && !mod.coverPath && !mod.coverUrl
+      );
+      let refreshedCovers = 0;
+      for (let index = 0; index < missingCoverMods.length; index += 1) {
+        const mod = missingCoverMods[index];
+        setProgress({
+          index: index + 1,
+          total: missingCoverMods.length,
+          name: mod.displayName,
+          phase: 'source-covers'
+        });
+        try {
+          const result = await refreshModAssets(mod.key);
+          if (result.coverPath) refreshedCovers += 1;
+          updateModInPayload(mod.key, refreshedAssetsPatch(result));
+        } catch (err) {
+          setError(String(err));
+        }
+      }
+      setInfo(
+        linkedMods.length
+          ? `Привязано поставщиков: ${linkedMods.length}${
+              refreshedCovers ? `, обложек: ${refreshedCovers}` : ''
+            }`
+          : 'Точных совпадений не найдено'
+      );
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setProgress(null);
+      setIdentifyingSources(false);
+    }
+  }, [applyPayload, payload?.mods, updateModInPayload]);
+
   const patchMod = useCallback(
     async (key, patch) => {
       setBusy(true);
@@ -595,20 +663,7 @@ function App() {
       setError('');
       try {
         const result = await refreshModAssets(key);
-        const patch = {
-          dependencies: result.dependencies ?? [],
-          resolvedDependencies: result.resolvedDependencies ?? result.dependencies ?? []
-        };
-        if (result.coverPath) {
-          patch.coverPath = result.coverPath;
-          patch.coverModifiedAt = result.coverModifiedAt ?? null;
-          patch.coverManual = false;
-          patch.coverUrl = coverUrlFor({
-            coverPath: result.coverPath,
-            coverModifiedAt: result.coverModifiedAt
-          });
-        }
-        updateModInPayload(key, patch);
+        updateModInPayload(key, refreshedAssetsPatch(result));
       } catch (err) {
         setError(String(err));
       } finally {
@@ -752,11 +807,16 @@ function App() {
   const uiLocked = busy;
 
   const progressLabel =
-    bootstrapping && progress
+    identifyingSources && progress
+      ? `Обложки · ${progress.index}/${progress.total}${
+          progress.name ? ` · ${progress.name}` : ''
+        }`
+      : bootstrapping && progress
       ? `Подготовка · ${progress.index}/${progress.total}${
           progress.name ? ` · ${progress.name}` : ''
         }`
       : '';
+  const showProgress = (bootstrapping || identifyingSources) && progress;
 
   const toolbar = canShowWorkspace ? (
     <div className="topToolbar" data-tauri-drag-region>
@@ -808,6 +868,20 @@ function App() {
           data-tauri-drag-region="false"
         />
       </label>
+      {stats.noIndex > 0 ? (
+        <div className="topActions" data-tauri-drag-region="false">
+          <button
+            type="button"
+            className="iconButton"
+            onClick={handleIdentifySources}
+            disabled={busy || bootstrapping || identifyingSources}
+            aria-label="Проверить поставщиков"
+            title="Проверить поставщиков"
+          >
+            <Link2 size={15} className={identifyingSources ? 'spin' : ''} />
+          </button>
+        </div>
+      ) : null}
     </div>
   ) : (
     <div className="topToolbar topToolbarEmpty" data-tauri-drag-region>
@@ -848,7 +922,7 @@ function App() {
           </section>
 
           <NoticeModal tone="bad" message={error} onClose={() => setError('')} />
-          <NoticeModal tone="ok" message={info && !error && !bootstrapping ? info : ''} onClose={() => setInfo('')} />
+          <NoticeModal tone="ok" message={info && !error && !bootstrapping && !identifyingSources ? info : ''} onClose={() => setInfo('')} />
 
           <section className="workspace">
             <ModTable
@@ -901,7 +975,7 @@ function App() {
       )}
       </div>
 
-      {bootstrapping && progress ? (
+      {showProgress ? (
         <footer className="prefetchProgressWrap">
           <div className="prefetchProgressTrack" aria-hidden="true">
             <div className="prefetchProgressBar" style={{ width: `${progressPercent}%` }} />

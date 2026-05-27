@@ -22,6 +22,8 @@ pub struct ProviderCandidate {
     pub title: String,
     pub icon_url: Option<String>,
     #[serde(default)]
+    pub exact_file_match: bool,
+    #[serde(default)]
     pub match_score: u32,
 }
 
@@ -392,11 +394,12 @@ pub(crate) fn curseforge_fingerprint_matches(
     matches
         .into_iter()
         .filter_map(|item| {
-            let fingerprint = item
-                .get("id")
+            let file = item.get("file")?;
+            let fingerprint = file
+                .get("fileFingerprint")
+                .or_else(|| item.get("id"))
                 .and_then(|value| value.as_u64())
                 .and_then(|value| u32::try_from(value).ok())?;
-            let file = item.get("file")?;
             let project_id = file.get("modId").and_then(|value| value.as_i64())?;
             let file_id = file.get("id").and_then(|value| value.as_i64())?;
             Some((
@@ -553,6 +556,7 @@ fn fetch_modrinth_search_batch(
                     .filter(|value| !value.is_empty())
                     .unwrap_or_else(|| "Без названия".to_string()),
                 icon_url: non_empty_json_string(hit.get("icon_url")),
+                exact_file_match: false,
                 match_score: 0,
             })
         })
@@ -627,6 +631,7 @@ fn fetch_curseforge_search_batch(
                     .map(str::to_string),
                 title,
                 icon_url,
+                exact_file_match: false,
                 match_score: 0,
             })
         })
@@ -685,6 +690,7 @@ pub(crate) fn curseforge_candidate_for_project(
             .map(str::to_string),
         title,
         icon_url,
+        exact_file_match: false,
         match_score: 0,
     })
 }
@@ -707,6 +713,7 @@ pub(crate) fn modrinth_candidate_for_project(
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "Без названия".to_string()),
         icon_url: non_empty_json_string(payload.get("icon_url")),
+        exact_file_match: false,
         match_score: 0,
     })
 }

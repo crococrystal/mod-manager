@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ExternalLink } from 'lucide-react';
+import { ExternalLink, LoaderCircle } from 'lucide-react';
 import {
   lookupProviderFingerprint,
-  searchProviderCandidates,
   switchModSource
 } from '../../api.js';
 import { sourceIcons, modModalSubtitle } from '../../lib/modMeta.jsx';
@@ -14,12 +13,8 @@ const providerOptions = [
   { id: 'curseforge', label: 'CurseForge' }
 ];
 
-const STRONG_MATCH_SCORE = 800;
-
-function prependCandidate(list, exact) {
-  if (!exact) return list;
-  const rest = list.filter((item) => item.id !== exact.id);
-  return [exact, ...rest];
+function providerLabel(source) {
+  return providerOptions.find((item) => item.id === source)?.label ?? 'Поставщик';
 }
 
 export function ProviderDialog({
@@ -29,85 +24,36 @@ export function ProviderDialog({
   onClose,
   onApplied
 }) {
-  const [step, setStep] = useState('providers');
-  const [platform, setPlatform] = useState(null);
-  const [candidates, setCandidates] = useState([]);
-  const [searchLoading, setSearchLoading] = useState(false);
+  const [checkingProvider, setCheckingProvider] = useState(null);
   const [applying, setApplying] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [notFound, setNotFound] = useState(null);
   const searchRunRef = useRef(0);
 
   useEffect(() => {
     if (!mod) return;
     searchRunRef.current += 1;
-    setStep('providers');
-    setPlatform(null);
-    setCandidates([]);
+    setCheckingProvider(null);
     setSearchError('');
-    setSearchLoading(false);
+    setNotFound(null);
+    setApplying(false);
   }, [mod?.key]);
+
+  useEffect(() => {
+    if (!notFound) return undefined;
+    const timer = window.setTimeout(() => setNotFound(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [notFound]);
 
   if (!mod) return null;
 
-  function openPlatform(source) {
-    if (source === 'curseforge' && !curseforgeApiKeySet) {
-      setSearchError('Для CurseForge нужен API key в настройках.');
-      return;
-    }
-    setPlatform(source);
-    setStep('results');
-    setSearchError('');
-    setCandidates([]);
-    setSearchLoading(true);
-    const runId = searchRunRef.current + 1;
-    searchRunRef.current = runId;
-
-    const request = {
-      source,
-      displayName: mod.displayName,
-      filename: mod.filename
-    };
-    let fingerprintStarted = false;
-    const lookupFingerprint = () => {
-      if (fingerprintStarted) return;
-      fingerprintStarted = true;
-      void lookupProviderFingerprint(request)
-        .then((exact) => {
-          if (searchRunRef.current !== runId) return;
-          if (exact) {
-            setSearchError('');
-            setCandidates((current) => prependCandidate(current, exact));
-          }
-        })
-        .catch(() => {});
-    };
-
-    void searchProviderCandidates(request)
-      .then((items) => {
-        if (searchRunRef.current !== runId) return;
-        setCandidates(items);
-        if ((items[0]?.matchScore ?? 0) < STRONG_MATCH_SCORE) {
-          lookupFingerprint();
-        }
-      })
-      .catch((err) => {
-        if (searchRunRef.current !== runId) return;
-        setSearchError(String(err));
-        lookupFingerprint();
-      })
-      .finally(() => {
-        if (searchRunRef.current !== runId) return;
-        setSearchLoading(false);
-      });
-  }
-
-  async function applyCandidate(candidate) {
+  async function applyCandidate(source, candidate) {
     setApplying(true);
     setSearchError('');
     try {
       const payload = await switchModSource({
         key: mod.key,
-        source: platform,
+        source,
         displayName: mod.displayName,
         filename: mod.filename,
         projectId: candidate.id,
@@ -123,15 +69,54 @@ export function ProviderDialog({
     }
   }
 
-  const uiLocked = busy || applying;
-  const showList = candidates.length > 0;
-  const hasProviderSource = mod.source === 'modrinth' || mod.source === 'curseforge';
-  const showProviderPageLink = step === 'providers' && hasProviderSource && mod.sourceUrl;
+  function showNotFound(source, detail) {
+    setNotFound({
+      source,
+      detail: detail || `На ${providerLabel(source)} нет точного совпадения по\u00a0файлу.`
+    });
+  }
 
-  const providerSubtitle =
-    step === 'providers'
-      ? modModalSubtitle(mod, { section: 'Поставщик' })
-      : providerOptions.find((item) => item.id === platform)?.label ?? 'Поставщик';
+  function openPlatform(source) {
+    if (busy || applying || checkingProvider) return;
+    if (source === 'curseforge' && !curseforgeApiKeySet) {
+      showNotFound(source, 'Для проверки CurseForge нужен API key в настройках.');
+      return;
+    }
+    setSearchError('');
+    setNotFound(null);
+    setCheckingProvider(source);
+    const runId = searchRunRef.current + 1;
+    searchRunRef.current = runId;
+
+    const request = {
+      source,
+      displayName: mod.displayName,
+      filename: mod.filename
+    };
+    void (async () => {
+      try {
+        const exact = await lookupProviderFingerprint(request);
+        if (searchRunRef.current !== runId) return;
+        if (exact) {
+          await applyCandidate(source, exact);
+          return;
+        }
+        showNotFound(source);
+      } catch (err) {
+        if (searchRunRef.current !== runId) return;
+        showNotFound(source, String(err));
+      } finally {
+        if (searchRunRef.current !== runId) return;
+        setCheckingProvider(null);
+      }
+    })();
+  }
+
+  const uiLocked = busy || applying || Boolean(checkingProvider);
+  const hasProviderSource = mod.source === 'modrinth' || mod.source === 'curseforge';
+  const showProviderPageLink = hasProviderSource && mod.sourceUrl;
+
+  const providerSubtitle = modModalSubtitle(mod, { section: 'Поставщик' });
 
   return createPortal(
     <div className="dependencyModalBackdrop" onMouseDown={() => !uiLocked && onClose()}>
@@ -151,73 +136,52 @@ export function ProviderDialog({
 
         {searchError ? <p className="providerSearchError">{searchError}</p> : null}
 
-        {step === 'providers' ? (
-          <div className="dependencyModal providerModal" role="dialog" aria-modal="true" aria-label="Поставщик мода">
-            {providerOptions.map((item) => {
-              const icon = sourceIcons[item.id]?.icon;
-              const active = mod.source === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`providerOption${active ? ' active' : ''}`}
-                  onClick={() => openPlatform(item.id)}
-                  disabled={busy || searchLoading}
-                >
-                  {icon ? <img src={icon} alt="" /> : null}
-                  <span>{item.label}</span>
-                  {active ? <strong>Выбран</strong> : <span className="providerOptionHint">Выбрать</span>}
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="providerResults" role="dialog" aria-modal="true" aria-label="Выбор мода на поставщике">
-            <button
-              type="button"
-              className="providerBack"
-              onClick={() => {
-                if (uiLocked) return;
-                setStep('providers');
-                setPlatform(null);
-                setCandidates([]);
-                setSearchError('');
-                setSearchLoading(false);
-                searchRunRef.current += 1;
-              }}
-              disabled={uiLocked}
-            >
-              <ArrowLeft size={14} />
-              Назад
-            </button>
-
-            {showList ? (
-              <ul className="providerCandidateList">
-                {candidates.map((candidate) => (
-                  <li key={`${platform}-${candidate.id}`}>
-                    <button
-                      type="button"
-                      className="providerCandidate"
-                      onClick={() => applyCandidate(candidate)}
-                      disabled={uiLocked}
-                    >
-                      {candidate.iconUrl ? (
-                        <img src={candidate.iconUrl} alt="" className="providerCandidateIcon" />
-                      ) : (
-                        <span className="providerCandidateIcon placeholder" aria-hidden="true" />
-                      )}
-                      <span className="providerCandidateText">
-                        <strong>{candidate.title}</strong>
-                        {candidate.slug ? <span>{candidate.slug}</span> : null}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        )}
+        <div className="dependencyModal providerModal" role="dialog" aria-modal="true" aria-label="Поставщик мода">
+          {providerOptions.map((item) => {
+            const icon = sourceIcons[item.id]?.icon;
+            const active = mod.source === item.id;
+            const checking = checkingProvider === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`providerOption${active ? ' active' : ''}`}
+                onClick={() => openPlatform(item.id)}
+                disabled={uiLocked}
+              >
+                {icon ? <img src={icon} alt="" /> : null}
+                <span>{item.label}</span>
+                {checking ? (
+                  <LoaderCircle size={18} className="spin providerOptionSpinner" />
+                ) : active ? (
+                  <strong>Выбран</strong>
+                ) : (
+                  <span className="providerOptionHint">Выбрать</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
+      {notFound ? (
+        <div
+          className="providerNotFoundLayer"
+          onMouseDown={(event) => {
+            event.stopPropagation();
+            if (event.target === event.currentTarget) {
+              setNotFound(null);
+            }
+          }}
+        >
+          <div className="providerNotFoundModal" role="alertdialog" aria-modal="true" aria-label="Мод не найден">
+            {sourceIcons[notFound.source]?.icon ? (
+              <img src={sourceIcons[notFound.source].icon} alt="" className="providerNotFoundIcon" />
+            ) : null}
+            <strong>Мод не найден</strong>
+            <p>{notFound.detail}</p>
+          </div>
+        </div>
+      ) : null}
     </div>,
     document.body
   );

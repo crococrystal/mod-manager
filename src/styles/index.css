@@ -1123,6 +1123,10 @@ td small {
   font-weight: 400;
 }
 
+.providerOptionSpinner {
+  color: #8de3bc;
+}
+
 .providerSearchError {
   margin: 0 16px 8px;
   color: #f3a68c;
@@ -1145,94 +1149,47 @@ td small {
   color: #8de3bc;
 }
 
-.providerResults {
-  display: grid;
-  gap: 10px;
-  padding: 0 16px 16px;
-}
-
-.providerBack {
-  display: inline-flex;
+.providerNotFoundLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 1002;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #9eb0b8;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
+  justify-content: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 0.18);
 }
 
-.providerBack:hover:not(:disabled) {
-  color: #eef2f3;
-}
-
-.providerCandidateList {
+.providerNotFoundModal {
   display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.providerCandidate {
-  display: grid;
-  grid-template-columns: 40px 1fr;
-  align-items: center;
+  justify-items: center;
   gap: 12px;
-  width: 100%;
-  min-height: 56px;
-  padding: 8px 12px;
-  border: 1px solid #35444b;
-  border-radius: 8px;
-  background: #12171a;
+  width: min(340px, calc(100vw - 32px));
+  padding: 22px 20px;
+  border: 1px solid #48555c;
+  border-radius: 10px;
+  background: #171d20;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
+  text-align: center;
+}
+
+.providerNotFoundIcon {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
+.providerNotFoundModal strong {
   color: #eef2f3;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+  font-size: 22px;
+  line-height: 1.15;
 }
 
-.providerCandidate:hover:not(:disabled) {
-  border-color: #2dbd63;
-  background: #14211b;
-}
-
-.providerCandidate:disabled {
-  opacity: 0.7;
-  cursor: default;
-}
-
-.providerCandidateIcon {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  object-fit: cover;
-}
-
-.providerCandidateIcon.placeholder {
-  display: block;
-  background: #1e272c;
-}
-
-.providerCandidateText {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.providerCandidateText strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.providerCandidateText span {
-  color: #9eb0b8;
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.providerNotFoundModal p {
+  margin: 0;
+  color: #a7b0b6;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .versionModalStack {
@@ -1438,17 +1395,17 @@ aside {
   padding: 0;
   border: none;
   border-radius: 6px;
-  background: rgba(15, 18, 22, 0.72);
-  color: #d4d8dc;
+  background: transparent;
+  color: #fff;
   cursor: pointer;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  transition: background 120ms ease, color 120ms ease;
+  mix-blend-mode: difference;
+  transition: opacity 120ms ease, transform 120ms ease;
 }
 
 .coverActionIcon:hover:not(:disabled) {
-  background: rgba(15, 18, 22, 0.92);
-  color: #ffffff;
+  background: transparent;
+  color: #fff;
+  transform: scale(1.08);
 }
 
 .coverActionIcon:disabled {
