@@ -10,12 +10,16 @@ filenames. Mod tags, dependencies, version and provider switching
 
 ## Download (prebuilt binaries)
 
-Prebuilt installers for macOS and Windows are published to a separate releases
-repo:
+Prebuilt installers for macOS, Windows and Linux are published to the
+**Releases** tab of this repository:
 
-<https://github.com/crococrystal/mod-manager-releases/releases/latest>
+<https://github.com/crococrystal/mod-manager/releases/latest>
 
-Linux is not produced by CI yet — see the build instructions below.
+Available artifacts:
+
+- macOS (Apple Silicon) — `.dmg` and `.app.tar.gz`
+- Windows — `-setup.exe` (NSIS installer)
+- Linux — `.deb` (Debian/Ubuntu) and `.AppImage` (portable)
 
 ## Features (current MVP)
 
@@ -150,9 +154,9 @@ npx tauri build --bundles appimage      # only AppImage
 npx tauri build --bundles deb,appimage  # both
 ```
 
-> Note: the in-app updater is wired to GitHub releases that publish macOS and
-> Windows artifacts only. Linux builds you produce locally will not auto-update —
-> simply rebuild from the latest `main` to upgrade.
+> Note: in-app auto-update on Linux works only when launching from the bundled
+> `.AppImage`. `.deb` installations do not self-update — rebuild or grab a fresh
+> `.deb` from the Releases page when a new version ships.
 
 ### 8. Install the resulting package
 
@@ -238,8 +242,8 @@ cd src-tauri && cargo check
 
 Code signing / release scripts (`scripts/publish-local-macos-release.sh`,
 `.github/workflows/build.yml`) expect a `TAURI_SIGNING_PRIVATE_KEY` env var.
-This is **only needed if you publish updates** to the releases repo — local
-builds and Linux builds work without it.
+This is **only needed if you publish updates** — local builds for personal use
+work without it.
 
 ## License
 

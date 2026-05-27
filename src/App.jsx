@@ -241,6 +241,7 @@ function App() {
   const [filter, setFilter] = useState('all');
   const [busy, setBusy] = useState(false);
   const [bootstrapping, setBootstrapping] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
@@ -776,6 +777,7 @@ function App() {
 
   const handleClearData = useCallback(async () => {
     setBusy(true);
+    setScanning(true);
     setError('');
     try {
       const saved = await getSettings();
@@ -785,11 +787,11 @@ function App() {
         applyPayload(next);
         void runBootstrap(saved.cacheStatus, { force: true });
       }
-      setInfo('Данные приложения удалены.');
     } catch (err) {
       setError(String(err));
       throw err;
     } finally {
+      setScanning(false);
       setBusy(false);
     }
   }, [applyPayload, runBootstrap]);
@@ -961,7 +963,9 @@ function App() {
 
   const progressPercent =
     progress?.total > 0 ? Math.min(100, Math.round((progress.index / progress.total) * 100)) : 0;
-  const progressIndeterminate = Boolean((bootstrapping || syncing) && !(progress?.total > 0));
+  const progressIndeterminate = Boolean(
+    (bootstrapping || syncing || scanning) && !(progress?.total > 0)
+  );
   const uiLocked = busy;
 
   const progressLabel = syncing
@@ -970,8 +974,12 @@ function App() {
     ? `Подготовка · ${progress.index}/${progress.total}${
         progress.name ? ` · ${progress.name}` : ''
       }`
+    : scanning
+    ? 'Сканирование модов…'
+    : bootstrapping
+    ? 'Подготовка…'
     : '';
-  const showProgress = bootstrapping || syncing;
+  const showProgress = bootstrapping || syncing || scanning;
 
   const toolbar = canShowWorkspace ? (
     <div className="topToolbar" data-tauri-drag-region>

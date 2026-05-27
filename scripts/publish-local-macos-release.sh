@@ -8,7 +8,7 @@ cd "$ROOT"
 set -a && [ -f .env ] && . ./.env && set +a
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
 
-RELEASES_REPO="${RELEASES_REPO:-crococrystal/mod-manager-releases}"
+RELEASES_REPO="${RELEASES_REPO:-crococrystal/mod-manager}"
 BUNDLE="$ROOT/src-tauri/target/release/bundle"
 STAMP="$ROOT/node_modules/.package-lock.sha"
 STAGING=""

@@ -4,7 +4,7 @@ set -euo pipefail
 artifacts_dir="${1:-artifacts}"
 out_file="${2:-artifacts/latest.json}"
 version="$(node -p "require('./package.json').version")"
-base_url="${RELEASE_BASE:-https://github.com/crococrystal/mod-manager-releases/releases/download/latest}"
+base_url="${RELEASE_BASE:-https://github.com/crococrystal/mod-manager/releases/download/latest}"
 notes="${UPDATE_NOTES:-Latest build}"
 pub_date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
@@ -41,6 +41,18 @@ if [ -n "$win_bundle" ] && [ -f "${win_bundle}.sig" ]; then
     --arg url "$win_url" \
     --arg signature "$win_sig" \
     '$current + {"windows-x86_64": {url: $url, signature: $signature}}')"
+fi
+
+linux_bundle="$(find "$artifacts_dir" -type f -name '*.AppImage.tar.gz' ! -name '*.sig' 2>/dev/null | head -n 1 || true)"
+if [ -n "$linux_bundle" ] && [ -f "${linux_bundle}.sig" ]; then
+  linux_name="$(basename "$linux_bundle")"
+  linux_sig="$(read_signature "${linux_bundle}.sig")"
+  linux_url="${base_url}/$(github_release_asset_name "$linux_name")"
+  platforms="$(jq -n \
+    --argjson current "$platforms" \
+    --arg url "$linux_url" \
+    --arg signature "$linux_sig" \
+    '$current + {"linux-x86_64": {url: $url, signature: $signature}}')"
 fi
 
 if [ "$platforms" = '{}' ]; then

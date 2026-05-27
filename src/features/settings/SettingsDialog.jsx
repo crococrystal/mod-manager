@@ -178,7 +178,8 @@ export function SettingsDialog({ settings, busy, syncing = false, onClose, onSav
       await clearAppData();
       await refreshUsage();
       setConfirmClearOpen(false);
-      await onClearData?.();
+      onClose?.();
+      void onClearData?.();
     } catch (err) {
       setMessage(String(err));
     } finally {
