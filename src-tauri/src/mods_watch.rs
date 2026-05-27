@@ -8,10 +8,10 @@ use std::{
 };
 
 use notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
+use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
 use tauri::{AppHandle, Emitter};
 
-type ModsDebouncer = Debouncer<notify::RecommendedWatcher, FileIdMap>;
+type ModsDebouncer = Debouncer<notify::RecommendedWatcher, RecommendedCache>;
 
 struct WatchState {
     _debouncer: ModsDebouncer,
