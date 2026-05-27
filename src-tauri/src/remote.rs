@@ -718,6 +718,262 @@ pub(crate) fn modrinth_candidate_for_project(
     })
 }
 
+/// Modrinth: `GET /v2/projects?ids=[…]` — до ~100 ID за запрос.
+/// Ключи в результате — оба `id` и `slug`, чтобы локальные `modrinth_id` любой формы попадали.
+pub(crate) fn modrinth_projects_batch(
+    client: &reqwest::blocking::Client,
+    ids: &[String],
+) -> HashMap<String, serde_json::Value> {
+    let mut result = HashMap::new();
+    if ids.is_empty() {
+        return result;
+    }
+    let unique: Vec<String> = {
+        let mut seen = std::collections::HashSet::new();
+        ids.iter()
+            .filter(|id| !id.trim().is_empty())
+            .filter(|id| seen.insert((*id).clone()))
+            .cloned()
+            .collect()
+    };
+
+    for chunk in unique.chunks(50) {
+        let Ok(ids_json) = serde_json::to_string(chunk) else {
+            continue;
+        };
+        let Some(payload) = client
+            .get("https://api.modrinth.com/v2/projects")
+            .query(&[("ids", ids_json.as_str())])
+            .send()
+            .ok()
+            .and_then(|response| response.error_for_status().ok())
+            .and_then(|response| response.json::<serde_json::Value>().ok())
+        else {
+            continue;
+        };
+        let Some(array) = payload.as_array() else {
+            continue;
+        };
+        for project in array {
+            if let Some(id) = project.get("id").and_then(|v| v.as_str()) {
+                result.insert(id.to_string(), project.clone());
+            }
+            if let Some(slug) = project.get("slug").and_then(|v| v.as_str()) {
+                result.entry(slug.to_string()).or_insert_with(|| project.clone());
+            }
+        }
+    }
+    result
+}
+
+/// Modrinth: `GET /v2/versions?ids=[…]` — до ~100 ID за запрос.
+pub(crate) fn modrinth_versions_batch(
+    client: &reqwest::blocking::Client,
+    ids: &[String],
+) -> HashMap<String, serde_json::Value> {
+    let mut result = HashMap::new();
+    if ids.is_empty() {
+        return result;
+    }
+    let unique: Vec<String> = {
+        let mut seen = std::collections::HashSet::new();
+        ids.iter()
+            .filter(|id| !id.trim().is_empty())
+            .filter(|id| seen.insert((*id).clone()))
+            .cloned()
+            .collect()
+    };
+
+    for chunk in unique.chunks(50) {
+        let Ok(ids_json) = serde_json::to_string(chunk) else {
+            continue;
+        };
+        let Some(payload) = client
+            .get("https://api.modrinth.com/v2/versions")
+            .query(&[("ids", ids_json.as_str())])
+            .send()
+            .ok()
+            .and_then(|response| response.error_for_status().ok())
+            .and_then(|response| response.json::<serde_json::Value>().ok())
+        else {
+            continue;
+        };
+        let Some(array) = payload.as_array() else {
+            continue;
+        };
+        for version in array {
+            if let Some(id) = version.get("id").and_then(|v| v.as_str()) {
+                result.insert(id.to_string(), version.clone());
+            }
+        }
+    }
+    result
+}
+
+/// CurseForge: `POST /v1/mods` `{"modIds":[…]}` — до 50 ID за запрос.
+/// Возвращает payload, обёрнутый в `{"data": …}`, чтобы быть совместимым с одиночным GET.
+pub(crate) fn curseforge_mods_batch(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    ids: &[String],
+) -> HashMap<String, serde_json::Value> {
+    let mut result = HashMap::new();
+    if api_key.trim().is_empty() || ids.is_empty() {
+        return result;
+    }
+    let parsed: Vec<i64> = {
+        let mut seen = std::collections::HashSet::new();
+        ids.iter()
+            .filter_map(|id| id.parse::<i64>().ok())
+            .filter(|id| seen.insert(*id))
+            .collect()
+    };
+
+    for chunk in parsed.chunks(50) {
+        let body = serde_json::json!({ "modIds": chunk });
+        let Some(payload) = client
+            .post("https://api.curseforge.com/v1/mods")
+            .header("x-api-key", api_key.trim())
+            .json(&body)
+            .send()
+            .ok()
+            .and_then(|response| response.error_for_status().ok())
+            .and_then(|response| response.json::<serde_json::Value>().ok())
+        else {
+            continue;
+        };
+        let Some(array) = payload.get("data").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for item in array {
+            if let Some(id) = item.get("id").and_then(|v| v.as_i64()) {
+                let wrapped = serde_json::json!({ "data": item });
+                result.insert(id.to_string(), wrapped);
+            }
+        }
+    }
+    result
+}
+
+/// CurseForge: `POST /v1/mods/files` `{"fileIds":[…]}` — до 50 ID за запрос.
+/// Возвращает payload, обёрнутый в `{"data": …}`.
+pub(crate) fn curseforge_files_batch(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    ids: &[String],
+) -> HashMap<String, serde_json::Value> {
+    let mut result = HashMap::new();
+    if api_key.trim().is_empty() || ids.is_empty() {
+        return result;
+    }
+    let parsed: Vec<i64> = {
+        let mut seen = std::collections::HashSet::new();
+        ids.iter()
+            .filter_map(|id| id.parse::<i64>().ok())
+            .filter(|id| seen.insert(*id))
+            .collect()
+    };
+
+    for chunk in parsed.chunks(50) {
+        let body = serde_json::json!({ "fileIds": chunk });
+        let Some(payload) = client
+            .post("https://api.curseforge.com/v1/mods/files")
+            .header("x-api-key", api_key.trim())
+            .json(&body)
+            .send()
+            .ok()
+            .and_then(|response| response.error_for_status().ok())
+            .and_then(|response| response.json::<serde_json::Value>().ok())
+        else {
+            continue;
+        };
+        let Some(array) = payload.get("data").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for item in array {
+            if let Some(id) = item.get("id").and_then(|v| v.as_i64()) {
+                let wrapped = serde_json::json!({ "data": item });
+                result.insert(id.to_string(), wrapped);
+            }
+        }
+    }
+    result
+}
+
+pub(crate) fn modrinth_cover_url_from_payload(payload: &serde_json::Value) -> Option<String> {
+    payload
+        .get("icon_url")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+}
+
+pub(crate) fn curseforge_cover_url_from_payload(payload: &serde_json::Value) -> Option<String> {
+    payload
+        .get("data")
+        .and_then(|data| data.get("logo"))
+        .and_then(|logo| {
+            non_empty_json_string(logo.get("thumbnailUrl"))
+                .or_else(|| non_empty_json_string(logo.get("url")))
+        })
+}
+
+pub(crate) fn modrinth_dependencies_from_payload(
+    payload: &serde_json::Value,
+    modrinth_lookup: &HashMap<String, String>,
+) -> Vec<String> {
+    let mut deps = Vec::new();
+    let Some(items) = payload.get("dependencies").and_then(|value| value.as_array()) else {
+        return deps;
+    };
+    for dep in items {
+        let required = dep
+            .get("dependency_type")
+            .and_then(|value| value.as_str())
+            .is_some_and(|kind| kind == "required");
+        if !required {
+            continue;
+        }
+        let Some(project_id) = dep.get("project_id").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if let Some(key) = modrinth_lookup.get(project_id) {
+            deps.push(key.clone());
+        }
+    }
+    deps
+}
+
+pub(crate) fn curseforge_dependencies_from_payload(
+    payload: &serde_json::Value,
+    curseforge_lookup: &HashMap<String, String>,
+) -> Vec<String> {
+    let mut deps = Vec::new();
+    let Some(items) = payload
+        .get("data")
+        .and_then(|data| data.get("dependencies"))
+        .and_then(|value| value.as_array())
+    else {
+        return deps;
+    };
+    for dep in items {
+        let required = dep
+            .get("relationType")
+            .and_then(|value| value.as_i64())
+            .is_some_and(|kind| kind == 3);
+        if !required {
+            continue;
+        }
+        let Some(dep_id) = dep.get("modId").and_then(|value| value.as_i64()) else {
+            continue;
+        };
+        if let Some(key) = curseforge_lookup.get(&dep_id.to_string()) {
+            deps.push(key.clone());
+        }
+    }
+    deps
+}
+
 pub(crate) fn fetch_api_dependencies(
     item: &ModEntry,
     client: &reqwest::blocking::Client,

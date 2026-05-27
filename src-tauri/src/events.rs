@@ -1,33 +1,6 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct PrefetchReport {
-    pub downloaded: u32,
-    pub skipped: u32,
-    pub failed: u32,
-    pub updated: u32,
-    pub unchanged: u32,
-    pub added_links: u32,
-    #[serde(default)]
-    pub errors: Vec<String>,
-}
-
-impl PrefetchReport {
-    pub fn new() -> Self {
-        Self {
-            downloaded: 0,
-            skipped: 0,
-            failed: 0,
-            updated: 0,
-            unchanged: 0,
-            added_links: 0,
-            errors: Vec::new(),
-        }
-    }
-}
-
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PrefetchProgressPayload {
@@ -154,27 +127,49 @@ pub(crate) fn emit_dependencies_ready(app: &AppHandle, key: &str, dependencies: 
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SyncProgressPayload {
-    phase: String,
-    index: u32,
-    total: u32,
-    name: String,
+struct LabelsReadyPayload {
+    key: String,
+    side: String,
+    library: bool,
+    technical: bool,
+    side_mode: String,
+    manual_side: String,
+    manual_library: bool,
+    manual_technical: bool,
+    provider_side: String,
+    provider_library: bool,
+    provider_technical: bool,
 }
 
-pub(crate) fn emit_sync_progress(
+pub(crate) fn emit_labels_ready(
     app: &AppHandle,
-    phase: &str,
-    index: u32,
-    total: u32,
-    name: &str,
+    key: &str,
+    side: &str,
+    library: bool,
+    technical: bool,
+    side_mode: &str,
+    manual_side: &str,
+    manual_library: bool,
+    manual_technical: bool,
+    provider_side: &str,
+    provider_library: bool,
+    provider_technical: bool,
 ) {
     let _ = app.emit(
-        "sync-progress",
-        SyncProgressPayload {
-            phase: phase.to_string(),
-            index,
-            total,
-            name: name.to_string(),
+        "labels-ready",
+        LabelsReadyPayload {
+            key: key.to_string(),
+            side: side.to_string(),
+            library,
+            technical,
+            side_mode: side_mode.to_string(),
+            manual_side: manual_side.to_string(),
+            manual_library,
+            manual_technical,
+            provider_side: provider_side.to_string(),
+            provider_library,
+            provider_technical,
         },
     );
 }
+

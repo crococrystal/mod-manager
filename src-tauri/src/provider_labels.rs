@@ -1,9 +1,5 @@
 use serde::Serialize;
 
-use tauri::AppHandle;
-
-use crate::bootstrap::ensure_task_active;
-use crate::events::emit_sync_progress;
 use crate::mods::{ModEntry, normalize_side};
 use crate::remote::{curseforge_get, http_client, modrinth_project, modrinth_version};
 use crate::settings::Settings;
@@ -103,35 +99,6 @@ pub(crate) fn refresh_provider_labels_bulk(
     mods: &[ModEntry],
     only_missing: bool,
 ) -> Result<usize, String> {
-    refresh_provider_labels_bulk_inner(settings, tags, mods, only_missing, None, None)
-}
-
-pub(crate) fn refresh_provider_labels_bulk_with_progress(
-    settings: &Settings,
-    tags: &mut crate::tags::TagFile,
-    mods: &[ModEntry],
-    only_missing: bool,
-    app: &AppHandle,
-    task_token: u64,
-) -> Result<usize, String> {
-    refresh_provider_labels_bulk_inner(
-        settings,
-        tags,
-        mods,
-        only_missing,
-        Some(app),
-        Some(task_token),
-    )
-}
-
-fn refresh_provider_labels_bulk_inner(
-    settings: &Settings,
-    tags: &mut crate::tags::TagFile,
-    mods: &[ModEntry],
-    only_missing: bool,
-    progress: Option<&AppHandle>,
-    task_token: Option<u64>,
-) -> Result<usize, String> {
     let candidates: Vec<&ModEntry> = mods
         .iter()
         .filter(|item| {
@@ -139,10 +106,9 @@ fn refresh_provider_labels_bulk_inner(
                 && (item.modrinth_id.is_some() || item.curseforge_id.is_some())
         })
         .collect();
-    let total = candidates.len() as u32;
 
     let mut updated = 0usize;
-    for (index, item) in candidates.iter().enumerate() {
+    for item in candidates.iter() {
         if only_missing {
             let already = tags
                 .mods
@@ -152,12 +118,6 @@ fn refresh_provider_labels_bulk_inner(
             if already {
                 continue;
             }
-        }
-        if let Some(app) = progress {
-            if let Some(token) = task_token {
-                ensure_task_active(app, token)?;
-            }
-            emit_sync_progress(app, "labels", index as u32 + 1, total, &item.display_name);
         }
         let tag = tags.mods.entry(item.key.clone()).or_default();
         if fetch_and_store_provider_labels(tag, item, settings).is_ok() {
@@ -225,24 +185,33 @@ fn fetch_modrinth_labels(
 ) -> Result<ProviderLabelsStore, String> {
     let payload = modrinth_project(client, project_id)
         .ok_or_else(|| "Modrinth не вернул данные проекта.".to_string())?;
-    let categories = json_string_array(payload.get("categories"));
-    let additional = json_string_array(payload.get("additional_categories"));
-    let mut loaders = json_string_array(payload.get("loaders"));
-    let mut game_versions = json_string_array(payload.get("game_versions"));
-    let client_side = json_string(payload.get("client_side")).unwrap_or_default();
-    let server_side = json_string(payload.get("server_side")).unwrap_or_default();
+    let version_payload =
+        version_id
+            .filter(|value| !value.is_empty())
+            .and_then(|version_id| modrinth_version(client, version_id));
+    Ok(build_modrinth_labels(&payload, version_payload.as_ref()))
+}
 
-    if let Some(version_id) = version_id.filter(|value| !value.is_empty()) {
-        if let Some(version) = modrinth_version(client, version_id) {
-            merge_unique(&mut loaders, json_string_array(version.get("loaders")));
-            merge_unique(
-                &mut game_versions,
-                json_string_array(version.get("game_versions")),
-            );
-        }
+pub(crate) fn build_modrinth_labels(
+    project: &serde_json::Value,
+    version: Option<&serde_json::Value>,
+) -> ProviderLabelsStore {
+    let categories = json_string_array(project.get("categories"));
+    let additional = json_string_array(project.get("additional_categories"));
+    let mut loaders = json_string_array(project.get("loaders"));
+    let mut game_versions = json_string_array(project.get("game_versions"));
+    let client_side = json_string(project.get("client_side")).unwrap_or_default();
+    let server_side = json_string(project.get("server_side")).unwrap_or_default();
+
+    if let Some(version) = version {
+        merge_unique(&mut loaders, json_string_array(version.get("loaders")));
+        merge_unique(
+            &mut game_versions,
+            json_string_array(version.get("game_versions")),
+        );
     }
 
-    Ok(ProviderLabelsStore {
+    ProviderLabelsStore {
         source: "modrinth".to_string(),
         fetched_at: now_iso(),
         categories,
@@ -251,7 +220,7 @@ fn fetch_modrinth_labels(
         game_versions,
         client_side,
         server_side,
-    })
+    }
 }
 
 fn fetch_curseforge_labels(
@@ -262,9 +231,18 @@ fn fetch_curseforge_labels(
 ) -> Result<ProviderLabelsStore, String> {
     let payload = curseforge_get(client, api_key, &format!("mods/{project_id}"))
         .ok_or_else(|| "CurseForge не вернул данные проекта.".to_string())?;
-    let data = payload
-        .get("data")
-        .ok_or_else(|| "CurseForge вернул пустой ответ.".to_string())?;
+    let file_payload = file_id
+        .filter(|value| !value.is_empty())
+        .and_then(|id| curseforge_get(client, api_key, &format!("mods/{project_id}/files/{id}")));
+    build_curseforge_labels(&payload, file_payload.as_ref())
+        .ok_or_else(|| "CurseForge вернул пустой ответ.".to_string())
+}
+
+pub(crate) fn build_curseforge_labels(
+    project: &serde_json::Value,
+    file: Option<&serde_json::Value>,
+) -> Option<ProviderLabelsStore> {
+    let data = project.get("data")?;
 
     let mut categories = Vec::new();
     if let Some(items) = data.get("categories").and_then(|value| value.as_array()) {
@@ -286,12 +264,9 @@ fn fetch_curseforge_labels(
     let mut client_side = String::new();
     let mut server_side = String::new();
 
-    let file_payload = file_id
-        .filter(|value| !value.is_empty())
-        .and_then(|id| curseforge_get(client, api_key, &format!("mods/{project_id}/files/{id}")))
-        .and_then(|value| value.get("data").cloned());
+    let file_data = file.and_then(|value| value.get("data"));
 
-    if let Some(file) = file_payload {
+    if let Some(file) = file_data {
         for version in json_string_array(file.get("gameVersions")) {
             if version.eq_ignore_ascii_case("client") {
                 client_side = "required".to_string();
@@ -325,7 +300,7 @@ fn fetch_curseforge_labels(
         server_side = "optional".to_string();
     }
 
-    Ok(ProviderLabelsStore {
+    Some(ProviderLabelsStore {
         source: "curseforge".to_string(),
         fetched_at: now_iso(),
         categories,

@@ -17,13 +17,10 @@ use crate::instance_registry;
 use crate::mods::{merge_keys, normalize_side, scan_mods_for_settings, stats_for, ModListPayload};
 use crate::provider_labels::{
     fetch_and_store_provider_labels, manual_tags_for, provider_tags_for,
-    refresh_provider_labels_bulk, refresh_provider_labels_bulk_with_progress,
-    refresh_result_for, RefreshProviderLabelsResult,
+    refresh_provider_labels_bulk, refresh_result_for, RefreshProviderLabelsResult,
 };
 use crate::mods_watch;
-use crate::prefetch::{
-    identify_unknown_sources, prefetch_mod_assets_for_settings, sync_mod_assets_for_settings,
-};
+use crate::prefetch::{identify_unknown_sources, sync_mods_unified, SyncFlags};
 use crate::providers::{
     InstallProviderVersionRequest, InstallProviderVersionResult, ListProviderVersionsRequest,
     ProviderVersionsPayload, SearchProviderRequest, SwitchModSourceRequest, SwitchModSourceResult,
@@ -330,13 +327,14 @@ pub(crate) async fn bootstrap_instance(
                 !plan_dependencies || !settings.auto_prefetch_dependencies;
 
             if run_covers || run_dependencies {
-                prefetch_mod_assets_for_settings(
-                    &settings,
-                    &app_handle,
-                    run_covers,
-                    run_dependencies,
-                    bootstrap_token,
-                )?;
+                let flags = SyncFlags {
+                    labels: false,
+                    covers: run_covers,
+                    dependencies: run_dependencies,
+                    force_covers: false,
+                    force_labels: false,
+                };
+                sync_mods_unified(&settings, &app_handle, flags, Some(bootstrap_token))?;
                 if run_covers {
                     covers_prepared = true;
                 }
@@ -723,31 +721,21 @@ pub(crate) async fn sync_provider_data(
         }
 
         let mut labels_refreshed: u32 = 0;
-        if request.labels {
-            ensure_task_active(&app_handle, task_token)?;
-            let mods = scan_mods_for_settings(&settings, catalog_root.clone())?;
-            let mut tags = read_tags(&paths.tags_path)?;
-            for tag in tags.mods.values_mut() {
-                tag.provider_labels = crate::tags::ProviderLabelsStore::default();
-            }
-            let updated = refresh_provider_labels_bulk_with_progress(
-                &settings,
-                &mut tags,
-                &mods,
-                false,
-                &app_handle,
-                task_token,
-            )?;
-            labels_refreshed = updated as u32;
-            write_tags(&paths.tags_path, &tags)?;
-            ensure_task_active(&app_handle, task_token)?;
-        }
-
         let mut assets_refreshed: u32 = 0;
-        if request.assets {
+        if request.labels || request.assets {
             ensure_task_active(&app_handle, task_token)?;
-            let report = sync_mod_assets_for_settings(&settings, &app_handle, task_token)?;
-            assets_refreshed = report.downloaded + report.updated;
+            let flags = SyncFlags {
+                labels: request.labels,
+                covers: request.assets,
+                dependencies: request.assets,
+                force_covers: request.assets,
+                force_labels: request.labels,
+            };
+            let unified =
+                sync_mods_unified(&settings, &app_handle, flags, Some(task_token))?;
+            labels_refreshed = unified.labels_refreshed;
+            assets_refreshed = unified.covers_downloaded + unified.dependencies_updated;
+            ensure_task_active(&app_handle, task_token)?;
         }
 
         let mods = scan_mods_for_settings(&settings, catalog_root)?;

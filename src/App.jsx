@@ -135,15 +135,9 @@ function refreshedProviderLabelsPatch(result) {
 
 function syncProgressLabel(progress) {
   if (!progress) return 'Синхронизация · Подготовка…';
-  const phase =
-    progress.phase === 'labels'
-      ? 'Метки'
-      : progress.phase === 'assets' || progress.kind === 'mods'
-      ? 'Обложки и зависимости'
-      : 'Подготовка';
-  if (!progress.total) return `Синхронизация · ${phase}…`;
+  if (!progress.total) return 'Синхронизация · Подготовка…';
   const tail = progress.name ? ` · ${progress.name}` : '';
-  return `Синхронизация · ${phase} · ${progress.index}/${progress.total}${tail}`;
+  return `Синхронизация · ${progress.index}/${progress.total}${tail}`;
 }
 
 function isTextEntryTarget(target) {
@@ -542,34 +536,18 @@ function App() {
 
   useEffect(() => {
     let unlistenProgress;
-    let unlistenSync;
     let unlistenCover;
     let unlistenDependencies;
+    let unlistenLabels;
     let unlistenSource;
     (async () => {
       unlistenProgress = await listenEvent('prefetch-progress', (event) => {
         const payload = event.payload;
         if (payload?.status === 'done') {
-          if (!syncingRef.current) {
-            setProgress(null);
-          }
-          return;
-        }
-        if (syncingRef.current) {
-          setProgress({ ...payload, phase: 'assets' });
+          setProgress(null);
           return;
         }
         setProgress(payload);
-      });
-      unlistenSync = await listenEvent('sync-progress', (event) => {
-        if (!syncingRef.current) return;
-        const payload = event.payload ?? {};
-        setProgress({
-          index: payload.index,
-          total: payload.total,
-          name: payload.name,
-          phase: payload.phase
-        });
       });
       unlistenCover = await listenEvent('cover-ready', (event) => {
         const { key, coverPath, coverModifiedAt } = event.payload ?? {};
@@ -583,6 +561,11 @@ function App() {
         if (!key || !Array.isArray(dependencies)) return;
         updateModInPayload(key, { dependencies });
       });
+      unlistenLabels = await listenEvent('labels-ready', (event) => {
+        const { key, ...rest } = event.payload ?? {};
+        if (!key) return;
+        updateModInPayload(key, modTagsUpdatePatch({ key, ...rest }));
+      });
       unlistenSource = await listenEvent('mod-source-ready', (event) => {
         const { key, ...patch } = event.payload ?? {};
         if (!key) return;
@@ -591,9 +574,9 @@ function App() {
     })();
     return () => {
       unlistenProgress?.();
-      unlistenSync?.();
       unlistenCover?.();
       unlistenDependencies?.();
+      unlistenLabels?.();
       unlistenSource?.();
     };
   }, [updateModInPayload]);
