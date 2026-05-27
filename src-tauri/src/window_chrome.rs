@@ -70,7 +70,7 @@ pub fn apply_windows_dwm_chrome(window: &WebviewWindow) {
         let no_border: u32 = 0xFFFF_FFFE;
         let _ = DwmSetWindowAttribute(
             hwnd,
-            DWMWA_BORDER_COLOR,
+            DWMWA_BORDER_COLOR as u32,
             &no_border as *const u32 as *const c_void,
             std::mem::size_of::<u32>() as u32,
         );
@@ -79,7 +79,7 @@ pub fn apply_windows_dwm_chrome(window: &WebviewWindow) {
         let preference: u32 = DWMWCP_DONOTROUND as u32;
         let _ = DwmSetWindowAttribute(
             hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
             &preference as *const u32 as *const c_void,
             std::mem::size_of::<u32>() as u32,
         );
