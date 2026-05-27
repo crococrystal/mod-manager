@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { DependencyModalBackdrop } from '../../components/DependencyModalBackdrop.jsx';
+import { ModalModNavRail } from '../../components/ModalModNavRail.jsx';
+import { getModalPortalRoot } from '../../lib/modalPortal.js';
 import { Check, Download, LoaderCircle } from 'lucide-react';
 import { installProviderVersion, listProviderVersions } from '../../api.js';
 import { formatDate, modModalSubtitle } from '../../lib/modMeta.jsx';
@@ -49,7 +52,7 @@ function isInstalledVersion(mod, version) {
   return Boolean(mod.filename && version.filename && mod.filename === version.filename);
 }
 
-export function VersionDialog({ mod, busy, onClose, onInstalled }) {
+export function VersionDialog({ mod, modNav, busy, onClose, onInstalled }) {
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(false);
   const [installingId, setInstallingId] = useState(null);
@@ -124,13 +127,14 @@ export function VersionDialog({ mod, busy, onClose, onInstalled }) {
   }
 
   return createPortal(
-    <div className="dependencyModalBackdrop" onMouseDown={() => !uiLocked && onClose()}>
+    <DependencyModalBackdrop uiLocked={uiLocked} onClose={onClose}>
       <div className="dependencyModalStack versionModalStack" onMouseDown={(event) => event.stopPropagation()}>
         <ModModalHead mod={mod} subtitle={subtitle} />
 
-        {error ? <p className="providerSearchError">{error}</p> : null}
+        <ModalModNavRail modNav={modNav} uiLocked={uiLocked}>
+          {error ? <p className="providerSearchError">{error}</p> : null}
 
-        <div className="versionModal" role="dialog" aria-modal="true" aria-label="Версии мода">
+          <div className="versionModal" role="dialog" aria-modal="true" aria-label="Версии мода">
           {loading ? (
             <div className="versionState versionLoading">
               <LoaderCircle className="spin" size={28} />
@@ -171,9 +175,10 @@ export function VersionDialog({ mod, busy, onClose, onInstalled }) {
               })}
             </ul>
           ) : null}
-        </div>
+          </div>
+        </ModalModNavRail>
       </div>
-    </div>,
-    document.body
+    </DependencyModalBackdrop>,
+    getModalPortalRoot()
   );
 }

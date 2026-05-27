@@ -20,8 +20,16 @@ export function refreshModAssets(key) {
   return invoke('refresh_mod_assets', { request: { key } });
 }
 
+export function refreshProviderLabels(key) {
+  return invoke('refresh_provider_labels', { request: { key } });
+}
+
 export function bootstrapInstance(force = false) {
   return invoke('bootstrap_instance', { force });
+}
+
+export function cancelBackgroundTask() {
+  return invoke('cancel_background_task');
 }
 
 export function clearAppData() {
@@ -106,4 +114,12 @@ export function uploadCover({ key, dataUrl }) {
 
 export function deleteCustomCover(key) {
   return invoke('delete_custom_cover', { key });
+}
+
+export function syncProviderData({ identify = false, labels = false, assets = false }) {
+  return invoke('sync_provider_data', { request: { identify, labels, assets } });
+}
+
+export function getDataUsage() {
+  return invoke('get_data_usage');
 }

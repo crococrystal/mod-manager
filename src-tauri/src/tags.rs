@@ -15,7 +15,42 @@ pub(crate) struct TagFile {
 }
 
 fn tag_file_version() -> u8 {
-    1
+    2
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderLabelsStore {
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub fetched_at: String,
+    #[serde(default)]
+    pub categories: Vec<String>,
+    #[serde(default)]
+    pub additional_categories: Vec<String>,
+    #[serde(default)]
+    pub loaders: Vec<String>,
+    #[serde(default)]
+    pub game_versions: Vec<String>,
+    #[serde(default)]
+    pub client_side: String,
+    #[serde(default)]
+    pub server_side: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LabelOverridesStore {
+    /// `auto` shows labels from `provider_labels`; `manual` uses stored `side` / `library` / `technical`.
+    #[serde(default = "default_side_mode")]
+    pub side_mode: String,
+    #[serde(default)]
+    pub disabled: Vec<String>,
+}
+
+fn default_side_mode() -> String {
+    "auto".to_string()
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -50,13 +85,19 @@ pub(crate) struct ModTags {
     #[serde(default)]
     pub curseforge_slug: String,
     #[serde(default)]
+    pub provider_labels: ProviderLabelsStore,
+    #[serde(default)]
+    pub label_overrides: LabelOverridesStore,
+    #[serde(default)]
+    pub custom_labels: Vec<String>,
+    #[serde(default)]
     pub updated_at: String,
 }
 
 pub(crate) fn read_tags(path: &Path) -> Result<TagFile, String> {
     if !path.exists() {
         return Ok(TagFile {
-            version: 1,
+            version: 2,
             updated_at: now_iso(),
             mods: HashMap::new(),
         });

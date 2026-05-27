@@ -1,22 +1,34 @@
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { getModalPortalRoot } from '../lib/modalPortal.js';
 import { IconButton } from './Button.jsx';
 
-export function Modal({ title, subtitle, children, footer, onClose, size = 'default' }) {
+export function Modal({
+  title,
+  subtitle,
+  children,
+  footer,
+  headerExtra,
+  onClose,
+  size = 'default',
+  ariaLabel
+}) {
+  const dialogLabel = ariaLabel ?? title ?? 'Диалог';
   const modal = (
     <div className="modalBackdrop" onMouseDown={onClose}>
       <section
         className={`modal modal-${size}`}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-label={dialogLabel}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="modalHeader">
-          <div>
-            <h2>{title}</h2>
+          <div className={`modalHeaderMain${title ? '' : ' modalHeaderMain--tabsOnly'}`}>
+            {title ? <h2>{title}</h2> : null}
+            {headerExtra}
           </div>
-          <IconButton icon={X} label="Закрыть" onClick={onClose} />
+          <IconButton icon={X} label="Закрыть" className="modalCloseButton" onClick={onClose} />
         </header>
         <div className="modalBody scrollArea">{children}</div>
         {footer ? <footer className="modalFooter">{footer}</footer> : null}
@@ -24,5 +36,5 @@ export function Modal({ title, subtitle, children, footer, onClose, size = 'defa
     </div>
   );
 
-  return createPortal(modal, document.body);
+  return createPortal(modal, getModalPortalRoot());
 }

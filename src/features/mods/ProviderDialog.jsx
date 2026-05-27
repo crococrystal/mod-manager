@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { DependencyModalBackdrop } from '../../components/DependencyModalBackdrop.jsx';
+import { ModalModNavRail } from '../../components/ModalModNavRail.jsx';
+import { getModalPortalRoot } from '../../lib/modalPortal.js';
 import { ExternalLink, LoaderCircle } from 'lucide-react';
 import {
   lookupProviderFingerprint,
@@ -19,6 +22,7 @@ function providerLabel(source) {
 
 export function ProviderDialog({
   mod,
+  modNav,
   busy,
   curseforgeApiKeySet,
   onClose,
@@ -119,7 +123,7 @@ export function ProviderDialog({
   const providerSubtitle = modModalSubtitle(mod, { section: 'Поставщик' });
 
   return createPortal(
-    <div className="dependencyModalBackdrop" onMouseDown={() => !uiLocked && onClose()}>
+    <DependencyModalBackdrop uiLocked={uiLocked} onClose={onClose}>
       <div className="dependencyModalStack providerModalStack" onMouseDown={(event) => event.stopPropagation()}>
         <ModModalHead
           mod={mod}
@@ -134,10 +138,11 @@ export function ProviderDialog({
           }
         />
 
-        {searchError ? <p className="providerSearchError">{searchError}</p> : null}
+        <ModalModNavRail modNav={modNav} uiLocked={uiLocked}>
+          {searchError ? <p className="providerSearchError">{searchError}</p> : null}
 
-        <div className="dependencyModal providerModal" role="dialog" aria-modal="true" aria-label="Поставщик мода">
-          {providerOptions.map((item) => {
+          <div className="dependencyModal providerModal" role="dialog" aria-modal="true" aria-label="Поставщик мода">
+            {providerOptions.map((item) => {
             const icon = sourceIcons[item.id]?.icon;
             const active = mod.source === item.id;
             const checking = checkingProvider === item.id;
@@ -160,8 +165,9 @@ export function ProviderDialog({
                 )}
               </button>
             );
-          })}
-        </div>
+            })}
+          </div>
+        </ModalModNavRail>
       </div>
       {notFound ? (
         <div
@@ -182,7 +188,7 @@ export function ProviderDialog({
           </div>
         </div>
       ) : null}
-    </div>,
-    document.body
+    </DependencyModalBackdrop>,
+    getModalPortalRoot()
   );
 }

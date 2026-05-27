@@ -37,3 +37,11 @@ pub fn bootstrap_still_active(app: &AppHandle, token: u64) -> bool {
         .map(|state| state.is_active(token))
         .unwrap_or(false)
 }
+
+pub fn ensure_task_active(app: &AppHandle, token: u64) -> Result<(), String> {
+    if bootstrap_still_active(app, token) {
+        Ok(())
+    } else {
+        Err("Прервано.".to_string())
+    }
+}

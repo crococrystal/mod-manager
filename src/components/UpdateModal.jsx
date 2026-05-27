@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { getModalPortalRoot } from '../lib/modalPortal.js';
 import { ArrowUpCircle, Download } from 'lucide-react';
 
 function progressLabel(progress) {
@@ -76,6 +77,6 @@ export function UpdateModal({
         ) : null}
       </div>
     </div>,
-    document.body
+    getModalPortalRoot()
   );
 }

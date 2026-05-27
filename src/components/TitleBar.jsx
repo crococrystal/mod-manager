@@ -75,8 +75,13 @@ function WindowControls() {
 
 export function TitleBar({ children }) {
   useEffect(() => {
-    if (!useCustomChrome) return;
-    void applyCustomChrome();
+    if (useCustomChrome) {
+      void applyCustomChrome();
+      return;
+    }
+    if (isMac) {
+      void getCurrentWindow().setTitleBarStyle('overlay').catch(() => {});
+    }
   }, []);
 
   const titleBarClass = useCustomChrome ? 'titleBarWindows' : isMac ? 'titleBarMac' : 'titleBarOther';

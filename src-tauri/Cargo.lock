@@ -2262,13 +2262,14 @@ dependencies = [
 
 [[package]]
 name = "mod-manager"
-version = "0.3.5"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "clipboard-rs",
  "notify",
  "notify-debouncer-full",
+ "objc2",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

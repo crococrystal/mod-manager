@@ -12,6 +12,8 @@
     "core:window:allow-close",
     "core:window:allow-set-decorations",
     "core:window:allow-is-maximized",
+    "core:window:allow-set-shadow",
+    "core:window:allow-set-title-bar-style",
     "opener:default",
     "dialog:default",
     "updater:default",

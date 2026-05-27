@@ -403,3 +403,23 @@ pub(crate) fn store_uploaded_cover(
     fs::write(&path, bytes).map_err(|error| error.to_string())?;
     Ok(path)
 }
+
+pub(crate) fn resolve_cover_state(
+    paths: &InstancePaths,
+    catalog_root: Option<&Path>,
+    key: &str,
+    modrinth_id: Option<&str>,
+    curseforge_id: Option<&str>,
+) -> (Option<String>, Option<u64>, bool) {
+    let mut item = ModEntry::cover_probe(
+        key,
+        modrinth_id
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        curseforge_id
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+    );
+    apply_existing_cover(&mut item, paths, catalog_root);
+    (item.cover_path, item.cover_modified_at, item.cover_manual)
+}

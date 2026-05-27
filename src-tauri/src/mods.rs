@@ -6,9 +6,13 @@ use std::{
 };
 
 use crate::covers::apply_existing_cover;
-use crate::dependencies::apply_jar_dependencies;
+use crate::dependencies::{apply_jar_dependencies, prune_reverse_jar_dependencies};
 use crate::mod_names::{display_name_from_filename, installed_version_from_filename};
 use crate::settings::{resolve_paths, Settings, SettingsView};
+use crate::provider_labels::{
+    manual_tags_for, provider_tags_for, resolve_library, resolve_side, resolve_technical,
+    side_mode_for,
+};
 use crate::tags::{read_tags, write_tags, ModTags, TagFile};
 use crate::util::{now_iso, system_time_iso};
 
@@ -58,6 +62,61 @@ pub(crate) struct ModEntry {
     pub curseforge_file_id: Option<String>,
     pub duplicate: bool,
     pub modified_at: String,
+    pub side_mode: String,
+    pub manual_side: String,
+    pub manual_library: bool,
+    pub manual_technical: bool,
+    pub provider_side: String,
+    pub provider_library: bool,
+    pub provider_technical: bool,
+}
+
+impl ModEntry {
+    pub(crate) fn cover_probe(
+        key: impl Into<String>,
+        modrinth_id: Option<String>,
+        curseforge_id: Option<String>,
+    ) -> Self {
+        Self {
+            key: key.into(),
+            modrinth_id,
+            curseforge_id,
+            filename: String::new(),
+            base: String::new(),
+            display_name: String::new(),
+            display_name_locked: false,
+            installed_version: None,
+            side: "universal".to_string(),
+            library: false,
+            technical: false,
+            description: String::new(),
+            dependencies: Vec::new(),
+            resolved_dependencies: Vec::new(),
+            jar_dependencies: Vec::new(),
+            used_by: Vec::new(),
+            cover_url: None,
+            cover_path: None,
+            cover_manual: false,
+            cover_modified_at: None,
+            source: String::new(),
+            source_url: None,
+            has_index: false,
+            has_tags: false,
+            index_file: None,
+            pack_side: None,
+            modrinth_version_id: None,
+            curseforge_file_id: None,
+            duplicate: false,
+            modified_at: String::new(),
+            side_mode: "auto".to_string(),
+            manual_side: "universal".to_string(),
+            manual_library: false,
+            manual_technical: false,
+            provider_side: "universal".to_string(),
+            provider_library: false,
+            provider_technical: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -77,6 +136,8 @@ pub(crate) struct ModListPayload {
     pub settings: SettingsView,
     pub mods: Vec<ModEntry>,
     pub stats: ModStats,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labels_synced: Option<usize>,
 }
 
 fn toml_value_at<'a>(value: &'a toml::Value, path: &[&str]) -> Option<&'a toml::Value> {
@@ -373,11 +434,12 @@ pub(crate) fn scan_mods_for_settings(
             "curseforge" if curseforge_id.is_some() => "curseforge",
             _ => default_source,
         };
-        let side = normalize_side(if tag.side.is_empty() {
-            "universal"
-        } else {
-            tag.side.as_str()
-        });
+        let side = resolve_side(&tag);
+        let library = resolve_library(&tag);
+        let technical = resolve_technical(&tag);
+        let side_mode = side_mode_for(&tag);
+        let (manual_side, manual_library, manual_technical) = manual_tags_for(&tag);
+        let (provider_side, provider_library, provider_technical) = provider_tags_for(&tag);
         let dependencies = tag.dependencies.clone();
         let resolved_dependencies = merge_keys(&[&dependencies, &[]]);
         let indexed_name = info.and_then(|info| info.name.clone());
@@ -397,8 +459,8 @@ pub(crate) fn scan_mods_for_settings(
             display_name_locked,
             installed_version,
             side,
-            library: tag.library,
-            technical: tag.technical,
+            library,
+            technical,
             description: tag.description,
             dependencies,
             resolved_dependencies,
@@ -423,6 +485,13 @@ pub(crate) fn scan_mods_for_settings(
                 .modified()
                 .map(system_time_iso)
                 .unwrap_or_else(|_| now_iso()),
+            side_mode,
+            manual_side,
+            manual_library,
+            manual_technical,
+            provider_side,
+            provider_library,
+            provider_technical,
         });
     }
 
@@ -432,6 +501,17 @@ pub(crate) fn scan_mods_for_settings(
     }
 
     apply_jar_dependencies(&mut mods, &paths)?;
+    if prune_reverse_jar_dependencies(&mut mods) {
+        let now = now_iso();
+        for item in &mods {
+            if let Some(tag) = tags.mods.get_mut(&item.key) {
+                tag.dependencies = item.dependencies.clone();
+                tag.updated_at = now.clone();
+            }
+        }
+        tags.updated_at = now;
+        write_tags(&paths.tags_path, &tags)?;
+    }
     for item in mods.iter_mut() {
         apply_existing_cover(item, &paths, catalog_root.as_deref());
         item.resolved_dependencies = merge_keys(&[&item.dependencies, &item.jar_dependencies]);

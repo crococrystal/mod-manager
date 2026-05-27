@@ -4,16 +4,26 @@ use base64::{engine::general_purpose, Engine};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use crate::bootstrap::{bootstrap_still_active, cancel_active_bootstrap};
+use crate::bootstrap::{bootstrap_still_active, cancel_active_bootstrap, ensure_task_active};
 use crate::catalog;
 use crate::covers::{
-    cover_ext_from_mime, delete_manual_cover, fetch_mod_cover, store_uploaded_cover,
+    cover_ext_from_mime, delete_manual_cover, fetch_mod_cover, resolve_cover_state,
+    store_uploaded_cover,
 };
-use crate::dependencies::same_dependency_list;
+use crate::dependencies::{
+    filter_reverse_jar_dependency_keys, jar_dependencies_by_key, same_dependency_list,
+};
 use crate::instance_registry;
 use crate::mods::{merge_keys, normalize_side, scan_mods_for_settings, stats_for, ModListPayload};
+use crate::provider_labels::{
+    fetch_and_store_provider_labels, manual_tags_for, provider_tags_for,
+    refresh_provider_labels_bulk, refresh_provider_labels_bulk_with_progress,
+    refresh_result_for, RefreshProviderLabelsResult,
+};
 use crate::mods_watch;
-use crate::prefetch::{identify_unknown_sources, prefetch_mod_assets_for_settings};
+use crate::prefetch::{
+    identify_unknown_sources, prefetch_mod_assets_for_settings, sync_mod_assets_for_settings,
+};
 use crate::providers::{
     InstallProviderVersionRequest, InstallProviderVersionResult, ListProviderVersionsRequest,
     ProviderVersionsPayload, SearchProviderRequest, SwitchModSourceRequest, SwitchModSourceResult,
@@ -31,10 +41,17 @@ use crate::util::{file_mtime_millis, now_iso, path_string};
 pub(crate) struct UpdateModTagsRequest {
     pub key: String,
     pub side: Option<String>,
+    pub side_mode: Option<String>,
     pub library: Option<bool>,
     pub technical: Option<bool>,
     pub description: Option<String>,
     pub dependencies: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RefreshProviderLabelsRequest {
+    pub key: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -122,6 +139,7 @@ pub(crate) async fn scan_mods(app: AppHandle) -> Result<ModListPayload, String> 
         settings: view,
         mods,
         stats,
+        labels_synced: None,
     })
 }
 
@@ -140,6 +158,11 @@ pub(crate) async fn identify_mod_sources(app: AppHandle) -> Result<ModListPayloa
         let mut tags = read_tags(&paths.tags_path)?;
         if identify_unknown_sources(&settings, &client, &paths, &mut tags, &mods)? {
             write_tags(&paths.tags_path, &tags)?;
+            mods = scan_mods_for_settings(&settings, catalog_root.clone())?;
+        }
+        let labels_synced = refresh_provider_labels_bulk(&settings, &mut tags, &mods, true)?;
+        if labels_synced > 0 {
+            write_tags(&paths.tags_path, &tags)?;
             mods = scan_mods_for_settings(&settings, catalog_root)?;
         }
         let stats = stats_for(&mods);
@@ -147,6 +170,11 @@ pub(crate) async fn identify_mod_sources(app: AppHandle) -> Result<ModListPayloa
             settings: view,
             mods,
             stats,
+            labels_synced: if labels_synced > 0 {
+                Some(labels_synced)
+            } else {
+                None
+            },
         })
     })
     .await
@@ -190,6 +218,7 @@ pub(crate) async fn refresh_mod_assets(
                     .map(|id| (id.clone(), entry.key.clone()))
             })
             .collect();
+        let jar_dependencies = jar_dependencies_by_key(&mods);
 
         let mut refreshed_settings = settings.clone();
         refreshed_settings.auto_prefetch_dependencies = true;
@@ -200,6 +229,12 @@ pub(crate) async fn refresh_mod_assets(
             &refreshed_settings,
             &modrinth_lookup,
             &curseforge_lookup,
+        );
+        let keys = filter_reverse_jar_dependency_keys(
+            &item.key,
+            &item.jar_dependencies,
+            &keys,
+            &jar_dependencies,
         );
         let mut tags = read_tags(&paths.tags_path)?;
         let current = tags.mods.entry(item.key.clone()).or_default();
@@ -334,27 +369,85 @@ pub(crate) async fn bootstrap_instance(
 }
 
 #[tauri::command]
+pub(crate) fn cancel_background_task(app: AppHandle) {
+    cancel_active_bootstrap(&app);
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModTagsUpdateResult {
+    pub key: String,
+    pub side: String,
+    pub library: bool,
+    pub technical: bool,
+    pub side_mode: String,
+    pub manual_side: String,
+    pub manual_library: bool,
+    pub manual_technical: bool,
+    pub provider_side: String,
+    pub provider_library: bool,
+    pub provider_technical: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<ModListPayload>,
+}
+
+fn mod_tags_update_result(tag: &crate::tags::ModTags, key: &str) -> ModTagsUpdateResult {
+    let resolved = refresh_result_for(tag, key);
+    let (manual_side, manual_library, manual_technical) = manual_tags_for(tag);
+    let (provider_side, provider_library, provider_technical) = provider_tags_for(tag);
+    ModTagsUpdateResult {
+        key: key.to_string(),
+        side: resolved.side,
+        library: resolved.library,
+        technical: resolved.technical,
+        side_mode: resolved.side_mode,
+        manual_side,
+        manual_library,
+        manual_technical,
+        provider_side,
+        provider_library,
+        provider_technical,
+        description: None,
+        payload: None,
+    }
+}
+
+#[tauri::command]
 pub(crate) async fn update_mod_tags(
     app: AppHandle,
     patch: UpdateModTagsRequest,
-) -> Result<ModListPayload, String> {
+) -> Result<ModTagsUpdateResult, String> {
     let settings = read_settings(&app)?;
     let paths = resolve_paths(&settings)?;
     let mut tags = read_tags(&paths.tags_path)?;
-    let current = tags.mods.entry(patch.key).or_default();
+    let current = tags.mods.entry(patch.key.clone()).or_default();
 
+    if let Some(side_mode) = patch.side_mode {
+        current.label_overrides.side_mode = if side_mode.trim() == "manual" {
+            "manual".to_string()
+        } else {
+            "auto".to_string()
+        };
+    }
     if let Some(side) = patch.side {
         current.side = normalize_side(&side);
+        current.label_overrides.side_mode = "manual".to_string();
     }
     if let Some(library) = patch.library {
         current.library = library;
+        current.label_overrides.side_mode = "manual".to_string();
     }
     if let Some(technical) = patch.technical {
         current.technical = technical;
+        current.label_overrides.side_mode = "manual".to_string();
     }
+    let description_changed = patch.description.is_some();
     if let Some(description) = patch.description {
         current.description = description;
     }
+    let dependencies_changed = patch.dependencies.is_some();
     if let Some(dependencies) = patch.dependencies {
         current.dependencies = dependencies;
     }
@@ -362,19 +455,57 @@ pub(crate) async fn update_mod_tags(
     tags.updated_at = now_iso();
     write_tags(&paths.tags_path, &tags)?;
 
+    let tag = tags.mods.get(&patch.key).cloned().unwrap_or_default();
+    let mut result = mod_tags_update_result(&tag, &patch.key);
+    if description_changed {
+        result.description = Some(tag.description);
+    }
+
+    if dependencies_changed {
+        let catalog_root = catalog::catalog_root(&app).ok();
+        let view = settings_view(&app, settings.clone())?;
+        let mods = tauri::async_runtime::spawn_blocking(move || {
+            scan_mods_for_settings(&settings, catalog_root)
+        })
+        .await
+        .map_err(|error| format!("Сканирование прервано: {error}"))??;
+        let stats = stats_for(&mods);
+        result.payload = Some(ModListPayload {
+            settings: view,
+            mods,
+            stats,
+            labels_synced: None,
+        });
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub(crate) async fn refresh_provider_labels(
+    app: AppHandle,
+    request: RefreshProviderLabelsRequest,
+) -> Result<RefreshProviderLabelsResult, String> {
+    let settings = read_settings(&app)?;
+    let paths = resolve_paths(&settings)?;
     let catalog_root = catalog::catalog_root(&app).ok();
-    let view = settings_view(&app, settings.clone())?;
-    let mods = tauri::async_runtime::spawn_blocking(move || {
-        scan_mods_for_settings(&settings, catalog_root)
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mods = scan_mods_for_settings(&settings, catalog_root)?;
+        let Some(item) = mods.iter().find(|entry| entry.key == request.key).cloned() else {
+            return Err("Мод не найден.".to_string());
+        };
+        let mut tags = read_tags(&paths.tags_path)?;
+        let tag = tags.mods.entry(request.key.clone()).or_default();
+        fetch_and_store_provider_labels(tag, &item, &settings)?;
+        tag.updated_at = now_iso();
+        tags.updated_at = now_iso();
+        write_tags(&paths.tags_path, &tags)?;
+        let tag = tags.mods.get(&request.key).cloned().unwrap_or_default();
+        Ok(refresh_result_for(&tag, &request.key))
     })
     .await
-    .map_err(|error| format!("Сканирование прервано: {error}"))??;
-    let stats = stats_for(&mods);
-    Ok(ModListPayload {
-        settings: view,
-        mods,
-        stats,
-    })
+    .map_err(|error| format!("Обновление меток прервано: {error}"))?
 }
 
 #[tauri::command]
@@ -452,12 +583,21 @@ pub(crate) async fn copy_mod_files(app: AppHandle, keys: Vec<String>) -> Result<
     .map_err(|error| format!("Копирование прервано: {error}"))?
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CoverUpdateResult {
+    pub key: String,
+    pub cover_path: Option<String>,
+    pub cover_modified_at: Option<u64>,
+    pub cover_manual: bool,
+}
+
 #[tauri::command]
-pub(crate) async fn upload_cover(
+pub(crate) fn upload_cover(
     app: AppHandle,
     key: String,
     data_url: String,
-) -> Result<ModListPayload, String> {
+) -> Result<CoverUpdateResult, String> {
     let settings = read_settings(&app)?;
     let paths = resolve_paths(&settings)?;
     let (meta, encoded) = data_url
@@ -478,44 +618,218 @@ pub(crate) async fn upload_cover(
         return Err("Файл обложки пустой.".to_string());
     }
 
-    store_uploaded_cover(&paths, &key, &bytes, ext)?;
-
-    let catalog_root = catalog::catalog_root(&app).ok();
-    let view = settings_view(&app, settings.clone())?;
-    let mods = tauri::async_runtime::spawn_blocking(move || {
-        scan_mods_for_settings(&settings, catalog_root)
-    })
-    .await
-    .map_err(|error| format!("Сканирование прервано: {error}"))??;
-    let stats = stats_for(&mods);
-    Ok(ModListPayload {
-        settings: view,
-        mods,
-        stats,
+    let path = store_uploaded_cover(&paths, &key, &bytes, ext)?;
+    let mtime = file_mtime_millis(&path);
+    Ok(CoverUpdateResult {
+        key,
+        cover_path: Some(path_string(path)),
+        cover_modified_at: mtime,
+        cover_manual: true,
     })
 }
 
 #[tauri::command]
-pub(crate) async fn delete_custom_cover(
+pub(crate) fn delete_custom_cover(
     app: AppHandle,
     key: String,
-) -> Result<ModListPayload, String> {
+) -> Result<CoverUpdateResult, String> {
     let settings = read_settings(&app)?;
     let paths = resolve_paths(&settings)?;
     delete_manual_cover(&paths, &key)?;
 
+    let tags = read_tags(&paths.tags_path)?;
+    let tag = tags.mods.get(&key);
     let catalog_root = catalog::catalog_root(&app).ok();
+    let (cover_path, cover_modified_at, cover_manual) = resolve_cover_state(
+        &paths,
+        catalog_root.as_deref(),
+        &key,
+        tag.map(|value| value.modrinth_id.as_str()),
+        tag.map(|value| value.curseforge_id.as_str()),
+    );
+    Ok(CoverUpdateResult {
+        key,
+        cover_path,
+        cover_modified_at,
+        cover_manual,
+    })
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SyncProviderDataRequest {
+    #[serde(default)]
+    pub identify: bool,
+    #[serde(default)]
+    pub labels: bool,
+    #[serde(default)]
+    pub assets: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SyncProviderDataResult {
+    pub linked: u32,
+    pub labels_refreshed: u32,
+    pub assets_refreshed: u32,
+    pub payload: ModListPayload,
+}
+
+#[tauri::command]
+pub(crate) async fn sync_provider_data(
+    app: AppHandle,
+    request: SyncProviderDataRequest,
+) -> Result<SyncProviderDataResult, String> {
+    if !request.identify && !request.labels && !request.assets {
+        return Err("Выбери хотя бы одну категорию.".to_string());
+    }
+
+    let settings = read_settings(&app)?;
+    let paths = resolve_paths(&settings)?;
     let view = settings_view(&app, settings.clone())?;
-    let mods = tauri::async_runtime::spawn_blocking(move || {
-        scan_mods_for_settings(&settings, catalog_root)
+    let catalog_root = catalog::catalog_root(&app).ok();
+    let app_handle = app.clone();
+    let task_token = {
+        let state = app.state::<crate::bootstrap::BootstrapState>();
+        state.cancel_active();
+        state.snapshot()
+    };
+
+    tauri::async_runtime::spawn_blocking(move || -> Result<SyncProviderDataResult, String> {
+        let Some(client) = http_client() else {
+            return Err("Не удалось создать HTTP-клиент.".to_string());
+        };
+
+        ensure_task_active(&app_handle, task_token)?;
+
+        let mut linked: u32 = 0;
+        if request.identify {
+            let mods = scan_mods_for_settings(&settings, catalog_root.clone())?;
+            let mut tags = read_tags(&paths.tags_path)?;
+            let before = mods
+                .iter()
+                .filter(|item| item.source == "modrinth" || item.source == "curseforge")
+                .count();
+            if identify_unknown_sources(&settings, &client, &paths, &mut tags, &mods)? {
+                write_tags(&paths.tags_path, &tags)?;
+                let after_mods = scan_mods_for_settings(&settings, catalog_root.clone())?;
+                let after = after_mods
+                    .iter()
+                    .filter(|item| item.source == "modrinth" || item.source == "curseforge")
+                    .count();
+                linked = after.saturating_sub(before) as u32;
+            }
+            ensure_task_active(&app_handle, task_token)?;
+        }
+
+        let mut labels_refreshed: u32 = 0;
+        if request.labels {
+            ensure_task_active(&app_handle, task_token)?;
+            let mods = scan_mods_for_settings(&settings, catalog_root.clone())?;
+            let mut tags = read_tags(&paths.tags_path)?;
+            for tag in tags.mods.values_mut() {
+                tag.provider_labels = crate::tags::ProviderLabelsStore::default();
+            }
+            let updated = refresh_provider_labels_bulk_with_progress(
+                &settings,
+                &mut tags,
+                &mods,
+                false,
+                &app_handle,
+                task_token,
+            )?;
+            labels_refreshed = updated as u32;
+            write_tags(&paths.tags_path, &tags)?;
+            ensure_task_active(&app_handle, task_token)?;
+        }
+
+        let mut assets_refreshed: u32 = 0;
+        if request.assets {
+            ensure_task_active(&app_handle, task_token)?;
+            let report = sync_mod_assets_for_settings(&settings, &app_handle, task_token)?;
+            assets_refreshed = report.downloaded + report.updated;
+        }
+
+        let mods = scan_mods_for_settings(&settings, catalog_root)?;
+        let stats = stats_for(&mods);
+        let payload = ModListPayload {
+            settings: view,
+            mods,
+            stats,
+            labels_synced: if labels_refreshed > 0 {
+                Some(labels_refreshed as usize)
+            } else {
+                None
+            },
+        };
+        Ok(SyncProviderDataResult {
+            linked,
+            labels_refreshed,
+            assets_refreshed,
+            payload,
+        })
     })
     .await
-    .map_err(|error| format!("Сканирование прервано: {error}"))??;
-    let stats = stats_for(&mods);
-    Ok(ModListPayload {
-        settings: view,
-        mods,
-        stats,
+    .map_err(|error| format!("Синхронизация прервана: {error}"))?
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DataUsageResult {
+    pub total: u64,
+    pub covers_cache: u64,
+    pub covers_manual: u64,
+    pub tags_file: u64,
+    pub other_cache: u64,
+}
+
+fn dir_size_bytes(path: &std::path::Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+    let mut total: u64 = 0;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.is_dir() {
+                stack.push(entry.path());
+            } else {
+                total = total.saturating_add(meta.len());
+            }
+        }
+    }
+    total
+}
+
+#[tauri::command]
+pub(crate) fn get_data_usage(app: AppHandle) -> Result<DataUsageResult, String> {
+    let settings = read_settings(&app)?;
+    let paths = resolve_paths(&settings)?;
+    let data_root = &paths.data_root;
+
+    let mut covers_cache = dir_size_bytes(&data_root.join("covers").join("cache"));
+    if let Ok(app_data) = app.path().app_data_dir() {
+        covers_cache = covers_cache.saturating_add(dir_size_bytes(&app_data.join("catalog").join("covers")));
+    }
+    let covers_manual = dir_size_bytes(&data_root.join("covers").join("manual"));
+    let tags_file = std::fs::metadata(&paths.tags_path)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+    let other_cache = dir_size_bytes(&data_root.join("cache"));
+    let total = covers_cache + covers_manual + tags_file + other_cache;
+
+    Ok(DataUsageResult {
+        total,
+        covers_cache,
+        covers_manual,
+        tags_file,
+        other_cache,
     })
 }
 
@@ -527,4 +841,9 @@ pub(crate) fn clear_app_data(app: AppHandle) -> Result<instance_registry::ClearD
         data_roots.push(paths.data_root);
     }
     instance_registry::clear_all(&app, data_roots)
+}
+
+#[tauri::command]
+pub(crate) fn refresh_window_shadow(window: tauri::WebviewWindow) {
+    crate::window_chrome::invalidate(&window);
 }

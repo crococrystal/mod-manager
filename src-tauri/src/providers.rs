@@ -10,6 +10,7 @@ use crate::covers::{
 use crate::events::{emit_cover_ready, emit_mod_source_ready};
 use crate::file_identity::read_file_identity;
 use crate::mods::{source_url, ModEntry};
+use crate::provider_labels::fetch_and_store_provider_labels;
 use crate::remote::{
     curseforge_candidate_for_project, curseforge_fingerprint_match, curseforge_mod_info,
     http_client, list_curseforge_candidates, list_modrinth_candidates,
@@ -455,6 +456,11 @@ fn complete_switch_identity(
         _ => return,
     }
 
+    let item = mod_entry_for_label_fetch(&followup, tag);
+    if fetch_and_store_provider_labels(tag, &item, &followup.settings).is_ok() {
+        changed = true;
+    }
+
     if !changed {
         return;
     }
@@ -580,5 +586,57 @@ fn cover_item_for_switch(
         curseforge_file_id: None,
         duplicate: false,
         modified_at: now_iso(),
+        side_mode: "auto".to_string(),
+        manual_side: "universal".to_string(),
+        manual_library: false,
+        manual_technical: false,
+        provider_side: "universal".to_string(),
+        provider_library: false,
+        provider_technical: false,
+    }
+}
+
+fn mod_entry_for_label_fetch(
+    followup: &SwitchModSourceFollowup,
+    tag: &crate::tags::ModTags,
+) -> ModEntry {
+    ModEntry {
+        key: followup.key.clone(),
+        filename: followup.filename.clone(),
+        base: followup.filename.clone(),
+        display_name: followup.display_name.clone(),
+        display_name_locked: false,
+        installed_version: None,
+        side: tag.side.clone(),
+        library: tag.library,
+        technical: tag.technical,
+        description: tag.description.clone(),
+        dependencies: tag.dependencies.clone(),
+        resolved_dependencies: Vec::new(),
+        jar_dependencies: Vec::new(),
+        used_by: Vec::new(),
+        cover_url: None,
+        cover_path: None,
+        cover_manual: false,
+        cover_modified_at: None,
+        source: followup.source.clone(),
+        source_url: None,
+        has_index: false,
+        has_tags: true,
+        index_file: None,
+        pack_side: None,
+        modrinth_id: clean_string(&tag.modrinth_id),
+        modrinth_version_id: clean_string(&tag.modrinth_version_id),
+        curseforge_id: clean_string(&tag.curseforge_id),
+        curseforge_file_id: clean_string(&tag.curseforge_file_id),
+        duplicate: false,
+        modified_at: now_iso(),
+        side_mode: "auto".to_string(),
+        manual_side: tag.side.clone(),
+        manual_library: tag.library,
+        manual_technical: tag.technical,
+        provider_side: "universal".to_string(),
+        provider_library: false,
+        provider_technical: false,
     }
 }

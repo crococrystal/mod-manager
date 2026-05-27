@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { getModalPortalRoot } from '../lib/modalPortal.js';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 const AUTO_CLOSE_MS = 2000;
@@ -71,6 +72,6 @@ export function NoticeModal({ tone = 'bad', message, onClose, confirm }) {
         ) : null}
       </div>
     </div>,
-    document.body
+    getModalPortalRoot()
   );
 }

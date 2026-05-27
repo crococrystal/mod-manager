@@ -2,11 +2,13 @@ use std::{collections::HashMap, path::PathBuf};
 
 use tauri::AppHandle;
 
-use crate::bootstrap::bootstrap_still_active;
+use crate::bootstrap::ensure_task_active;
 
 use crate::catalog;
 use crate::covers::{apply_existing_cover, fetch_mod_cover};
-use crate::dependencies::same_dependency_list;
+use crate::dependencies::{
+    filter_reverse_jar_dependency_keys, jar_dependencies_by_key, same_dependency_list,
+};
 use crate::events::{
     emit_cover_ready, emit_dependencies_ready, emit_prefetch_done, emit_prefetch_progress,
     PrefetchReport,
@@ -114,6 +116,32 @@ pub(crate) fn prefetch_mod_assets_for_settings(
     run_dependencies: bool,
     bootstrap_token: u64,
 ) -> Result<PrefetchReport, String> {
+    prefetch_mod_assets_for_settings_inner(
+        settings,
+        app,
+        run_covers,
+        run_dependencies,
+        false,
+        Some(bootstrap_token),
+    )
+}
+
+pub(crate) fn sync_mod_assets_for_settings(
+    settings: &Settings,
+    app: &AppHandle,
+    task_token: u64,
+) -> Result<PrefetchReport, String> {
+    prefetch_mod_assets_for_settings_inner(settings, app, true, true, true, Some(task_token))
+}
+
+fn prefetch_mod_assets_for_settings_inner(
+    settings: &Settings,
+    app: &AppHandle,
+    run_covers: bool,
+    run_dependencies: bool,
+    force_refresh: bool,
+    bootstrap_token: Option<u64>,
+) -> Result<PrefetchReport, String> {
     let paths = resolve_paths(settings)?;
     let catalog_root: Option<PathBuf> = catalog::catalog_root(app).ok();
     let mut mods = scan_mods_for_settings(settings, catalog_root.clone())?;
@@ -147,11 +175,11 @@ pub(crate) fn prefetch_mod_assets_for_settings(
     let mut report = PrefetchReport::new();
     let has_cf_key = !settings.curseforge_api_key.trim().is_empty();
     let total = mods.len() as u32;
+    let jar_dependencies = jar_dependencies_by_key(&mods);
 
     for (index, item) in mods.iter_mut().enumerate() {
-        if !bootstrap_still_active(app, bootstrap_token) {
-            emit_prefetch_done(app, "mods");
-            return Err("Прервано: выбрана другая сборка.".to_string());
+        if let Some(token) = bootstrap_token {
+            ensure_task_active(app, token)?;
         }
 
         let step = index as u32 + 1;
@@ -159,8 +187,13 @@ pub(crate) fn prefetch_mod_assets_for_settings(
         let mut progress_started = false;
 
         if run_covers {
-            apply_existing_cover(item, &paths, catalog_root.as_deref());
-            if item.cover_path.is_some() {
+            if !force_refresh {
+                apply_existing_cover(item, &paths, catalog_root.as_deref());
+            }
+            let already_has_cover = !force_refresh && item.cover_path.is_some();
+            if already_has_cover {
+                report.skipped += 1;
+            } else if item.cover_manual {
                 report.skipped += 1;
             } else if item.modrinth_id.is_some() || item.curseforge_id.is_some() {
                 did_work = true;
@@ -172,7 +205,7 @@ pub(crate) fn prefetch_mod_assets_for_settings(
                     catalog_root.as_deref(),
                     item,
                     settings,
-                    false,
+                    force_refresh,
                 ) {
                     let mtime = file_mtime_millis(&path);
                     let stored = path_string(path);
@@ -216,6 +249,12 @@ pub(crate) fn prefetch_mod_assets_for_settings(
                     settings,
                     &modrinth_lookup,
                     &curseforge_lookup,
+                );
+                let keys = filter_reverse_jar_dependency_keys(
+                    &item.key,
+                    &item.jar_dependencies,
+                    &keys,
+                    &jar_dependencies,
                 );
                 if keys.is_empty() {
                     report.unchanged += 1;

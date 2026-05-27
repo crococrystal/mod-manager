@@ -155,7 +155,7 @@ export function ModTable({
                     className="tagMarkButton"
                     onClick={(event) => {
                       event.stopPropagation();
-                    onTagsClick?.(mod, event.currentTarget.getBoundingClientRect());
+                    onTagsClick?.(mod);
                     }}
                     title="Метки мода"
                   >

@@ -1,8 +1,9 @@
 :root {
   --editor-panel-width: 260px;
+  --window-radius: 24px;
   color-scheme: dark;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #15191c;
+  background: transparent;
   color: #e6e8ea;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -16,13 +17,48 @@ html,
 body,
 #root {
   height: 100%;
+  background: transparent;
 }
 
 body {
   margin: 0;
   min-width: 980px;
   overflow: hidden;
+  background: transparent;
+}
+
+.windowFrame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border-radius: var(--window-radius);
+  overflow: hidden;
   background: #15191c;
+  transform: translateZ(0);
+  isolation: isolate;
+}
+
+.windowFrame.isMaximized {
+  border-radius: 0;
+}
+
+.windowFrame.isMaximized .appModalRoot {
+  border-radius: 0;
+}
+
+.appModalRoot {
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.appModalRoot:not(:empty) {
+  pointer-events: auto;
 }
 
 .scrollArea {
@@ -131,10 +167,11 @@ main {
 .winControls {
   display: flex;
   flex-shrink: 0;
-  align-items: stretch;
+  align-items: center;
   align-self: stretch;
+  gap: 2px;
   margin-left: 6px;
-  margin-right: 0;
+  padding-right: 14px;
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
@@ -142,14 +179,14 @@ main {
 .winControl {
   display: inline-grid;
   place-items: center;
-  width: 44px;
-  height: 100%;
+  width: 32px;
+  height: 32px;
   border: 0;
-  border-radius: 0;
+  border-radius: 999px;
   background: transparent;
   color: #cbd1d5;
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease;
 }
 
 .winControl:hover {
@@ -265,12 +302,48 @@ h1 {
   transition: width 0.15s ease;
 }
 
+.prefetchProgressBar.indeterminate {
+  width: 36% !important;
+  animation: settingsUpdateIndeterminate 1.1s ease-in-out infinite;
+}
+
 .prefetchProgressLabel {
+  flex: 1;
+  min-width: 0;
   margin: 0;
-  padding: 6px 22px 10px;
   color: #9fa8ad;
   font-size: 12px;
   line-height: 1.4;
+}
+
+.prefetchProgressRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 10px 22px;
+}
+
+.prefetchProgressCancel {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  color: #8a949b;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.prefetchProgressCancel:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e6e8ea;
+}
+
+.prefetchProgressCancel:active {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .iconButton {
@@ -471,7 +544,7 @@ h1 {
 }
 
 .noticeToastLayer {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 1100;
   display: flex;
@@ -1150,7 +1223,7 @@ td small {
 }
 
 .providerNotFoundLayer {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 1002;
   display: flex;
@@ -1378,6 +1451,25 @@ aside {
   position: relative;
 }
 
+.editorCoverDropArea--active .modCover.hero {
+  filter: brightness(0.72);
+}
+
+.coverDropOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgb(29 40 38 / 0.78);
+  color: #e6f4ef;
+  font-size: 13px;
+  font-weight: 650;
+  pointer-events: none;
+  border: 2px dashed #7bb7a3;
+}
+
 .coverActionStack {
   position: absolute;
   top: 6px;
@@ -1485,52 +1577,204 @@ aside {
   font-weight: 650;
 }
 
-.compactModalStack {
+.descriptionModalStack {
   width: min(520px, calc(100vw - 32px));
 }
 
-.compactModal {
-  display: grid;
-  gap: 14px;
-  padding: 16px;
-  border: 1px solid #48555c;
-  border-radius: 10px;
-  background: #171d20;
-  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
+.descriptionModalInput {
+  display: block;
+  width: 100%;
+  height: 168px;
+  min-height: 168px;
+  max-height: 168px;
+  resize: none;
+  overflow-y: auto;
+  border: 1px solid #39454b;
+  border-radius: 8px;
+  outline: 0;
+  padding: 10px 12px;
+  background: #101416;
+  color: #e6e8ea;
+  font: inherit;
+  line-height: 1.4;
 }
 
-.compactModal textarea {
-  min-height: 150px;
+.descriptionModalInput:focus {
+  border-color: #7bb7a3;
 }
 
-.compactModalActions {
+.descriptionModalInput:disabled {
+  opacity: 0.6;
+}
+
+.tagsModalStack {
+  width: min(420px, calc(100vw - 32px));
+}
+
+.tagsModalHead {
+  align-items: flex-start;
+  padding-right: 4px;
+}
+
+.tagsModalHead .dependencyModalHeadText {
+  flex: 1;
+  gap: 4px;
+}
+
+.tagsModalHeadActions {
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  align-items: center;
+  align-self: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
-.tagsPopoverBackdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  background: transparent;
+.tagsModalHeadActions .coverActionIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  mix-blend-mode: normal;
+  color: #c5cdd3;
 }
 
-.tagsPopover {
-  position: fixed;
-  z-index: 1001;
-  display: grid;
-  gap: 12px;
-  width: min(300px, calc(100vw - 24px));
+.tagsModalHeadActions .coverActionIcon:hover:not(:disabled) {
+  color: #eef2f3;
+  background: rgb(255 255 255 / 0.06);
+  transform: none;
+}
+
+.tagsModalHeadActions .coverActionIcon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.tagsModal.dependencyModal {
+  display: block;
+  grid-template-rows: none;
+  gap: 0;
+  max-height: none;
   padding: 12px;
-  border: 1px solid #48555c;
-  border-radius: 10px;
-  background: #171d20;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
 }
 
-.tagsPopover .dependencyModalTitle {
-  font-size: 20px;
+.tagsModalRow {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.tagsModalGroup {
+  display: flex;
+  flex: 1;
+  gap: 1px;
+  min-width: 0;
+  border: 1px solid #39454b;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #39454b;
+  padding: 0;
+}
+
+.tagsModalGroup:first-child {
+  flex: 1.5;
+}
+
+.tagsModalGroup button {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 52px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #22292d;
+}
+
+.tagsModalGroup button:first-child {
+  border-radius: 7px 0 0 7px;
+}
+
+.tagsModalGroup button:last-child {
+  border-radius: 0 7px 7px 0;
+}
+
+.tagsModalGroup button:only-child {
+  border-radius: 7px;
+}
+
+.tagsModalGroup button svg {
+  width: 24px;
+  height: 24px;
+}
+
+.tagsModalGroup:not(.tagButtonsProvider) button:not(.active) {
+  background: #0a0e11;
+}
+
+.tagsModalGroup:not(.tagButtonsProvider) button:not(.active) svg,
+.tagsModalGroup:not(.tagButtonsProvider) button:not(.active) .tagIcon {
+  opacity: 1;
+  filter: none;
+}
+
+.tagsModalGroup:not(.tagButtonsProvider) button:hover:not(:disabled):not(.active) {
+  background: #12171b;
+}
+
+.tagsModalGroup:not(.tagButtonsProvider) button.active {
+  background: #243d36;
+}
+
+.tagsModalGroup:not(.tagButtonsProvider) button.active .tagIcon {
+  filter: brightness(1.06);
+}
+
+.tagsModalStack .tagSourceModeButton.active {
+  color: #9fd4bf;
+}
+
+.tagsModalHeadActions .tagSourceModeIcon {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: block;
+  object-fit: contain;
+}
+
+.tagButtonsProvider {
+  pointer-events: none;
+  background: #181e22;
+  border-color: #2a3238;
+}
+
+.tagButtonsProvider button:not(.active) {
+  background: #0a0e11;
+}
+
+.tagButtonsProvider button:not(.active) svg,
+.tagButtonsProvider button:not(.active) .tagIcon {
+  opacity: 0.28;
+  filter: saturate(0.4) brightness(0.72);
+}
+
+.tagButtonsProvider button.active {
+  background: #243d36;
+  box-shadow: none;
+}
+
+.tagsModalGroup.tagButtonsProvider button:first-child.active {
+  border-radius: 7px 0 0 7px;
+}
+
+.tagsModalGroup.tagButtonsProvider button:last-child.active {
+  border-radius: 0 7px 7px 0;
+}
+
+.tagButtonsProvider button.active svg,
+.tagButtonsProvider button.active .tagIcon {
+  opacity: 1;
+  filter: none;
 }
 
 .tagDialogGroup {
@@ -1610,26 +1854,6 @@ textarea:focus {
   padding: 0;
 }
 
-.usedByGroup label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.usedByCount {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: #243038;
-  color: #9eb0b8;
-  font-size: 11px;
-  font-weight: 700;
-}
-
 .dependencyTiles {
   display: flex;
   flex-wrap: wrap;
@@ -1688,7 +1912,7 @@ textarea:focus {
 }
 
 .dependencyModalBackdrop {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 1000;
   display: flex;
@@ -1696,6 +1920,87 @@ textarea:focus {
   justify-content: center;
   padding: 16px;
   background: rgb(0 0 0 / 0.55);
+}
+
+.modalModNavRail {
+  position: relative;
+  width: 100%;
+  overflow: visible;
+}
+
+.modalModNavRailBody {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.modalModNavRailBody > .dependencyModal,
+.modalModNavRailBody > .dependencyModalDualGrid,
+.modalModNavRailBody > .versionModal,
+.modalModNavRailBody > .descriptionModalInput {
+  flex: 1;
+  min-width: 0;
+}
+
+.modalModNavRailBody > .compactModal {
+  width: 100%;
+  min-width: 0;
+}
+
+.modalModNavBtn {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #8d969c;
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: color 120ms ease, opacity 120ms ease;
+}
+
+.modalModNavBtnPrev {
+  right: 100%;
+  margin-right: 10px;
+}
+
+.modalModNavBtnNext {
+  left: 100%;
+  margin-left: 10px;
+}
+
+.modalModNavBtn:hover:not(:disabled) {
+  color: #e8ecef;
+}
+
+.modalModNavBtn:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+.modalModNavBtn svg {
+  fill: none;
+}
+
+.dependencyModalStack,
+.dependencyModalDual,
+.tagsModalStack,
+.providerModalStack,
+.versionModalStack,
+.descriptionModalStack {
+  overflow: visible;
+}
+
+.dependencyModalBackdrop:has(.modalModNavRail) {
+  padding-inline: 58px;
 }
 
 .dependencyModalStack {
@@ -1710,23 +2015,24 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: min(720px, 100%);
+  width: min(480px, 100%);
   max-height: min(640px, calc(100vh - 32px));
 }
 
 .dependencyModalDualGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   min-height: 0;
 }
 
 .dependencyModalPane {
   display: flex;
+  flex: 0 1 auto;
   flex-direction: column;
   min-width: 0;
-  min-height: 280px;
-  max-height: min(480px, calc(100vh - 140px));
+  height: auto;
+  max-height: min(360px, calc(50vh - 96px));
   border: 1px solid #48555c;
   border-radius: 10px;
   background: #171d20;
@@ -1766,8 +2072,9 @@ textarea:focus {
 }
 
 .dependencyModalPaneBody {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
+  max-height: min(280px, calc(50vh - 180px));
   overflow: auto;
   padding: 4px;
 }
@@ -2064,7 +2371,7 @@ dd {
 }
 
 .modalBackdrop {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 1000;
   display: flex;
@@ -2118,6 +2425,27 @@ dd {
 .modalHeader h2 {
   color: #fff;
   font-size: 18px;
+}
+
+.modalCloseButton {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: transparent;
+  color: #8a949b;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.modalCloseButton:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #e6e8ea;
+}
+
+.modalCloseButton:active {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .modalBody {
@@ -2432,4 +2760,360 @@ dd {
   to {
     transform: rotate(360deg);
   }
+}
+
+.modalHeaderMain {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.modalHeaderMain--tabsOnly {
+  flex: 1 1 auto;
+}
+
+.modalHeaderMain--tabsOnly .settingsTabs {
+  width: 100%;
+}
+
+.settingsTabs {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+
+.settingsTab {
+  appearance: none;
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #15191c;
+  color: #a7b0b6;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.settingsTabIcon {
+  flex: 0 0 auto;
+  color: #8a949b;
+  transition: color 0.15s ease;
+}
+
+.settingsTabLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsTab:hover {
+  background: #1c2327;
+  border-color: #465158;
+  color: #e3eaee;
+}
+
+.settingsTab:hover .settingsTabIcon {
+  color: #b8c4ca;
+}
+
+.settingsTab--active {
+  background: linear-gradient(180deg, #24302d 0%, #1d2826 100%);
+  border-color: #4f7a6d;
+  color: #e6f4ef;
+  box-shadow: inset 0 0 0 1px rgb(123 183 163 / 0.1);
+}
+
+.settingsTab--active .settingsTabIcon {
+  color: #7bb7a3;
+}
+
+.settingsTab:focus-visible {
+  outline: 2px solid #7bb7a3;
+  outline-offset: 2px;
+}
+
+.settingsData {
+  display: grid;
+  gap: 20px;
+}
+
+.settingsBlock {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #12181b;
+}
+
+.settingsBlockHeader {
+  display: grid;
+  gap: 4px;
+}
+
+.settingsBlockHeader--usage,
+.settingsBlockHeader--sync {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settingsSyncIconBtn {
+  flex: 0 0 auto;
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #4f7a6d;
+  border-radius: 50%;
+  background: #23302d;
+  color: #7bb7a3;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.settingsSyncIconBtn:hover:not(:disabled) {
+  background: #2d4a43;
+  border-color: #7bb7a3;
+  color: #e6f4ef;
+}
+
+.settingsSyncIconBtn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.settingsSyncIconBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settingsBlockHeaderMain {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settingsBlockTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #e6e8ea;
+}
+
+.settingsBlockHint {
+  margin: 0;
+  color: #8a949b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.settingsCheckList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.settingsCheckRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.settingsCheckRow:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settingsCheckRow input[type='checkbox'] {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: #7bb7a3;
+  flex: 0 0 16px;
+}
+
+.settingsCheckRow input[type='checkbox']:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settingsCheckMain {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settingsCheckTitle {
+  color: #e6e8ea;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settingsCheckHint {
+  color: #8a949b;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.settingsBlockActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.settingsPrimaryBtn,
+.settingsSecondaryBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.settingsPrimaryBtn {
+  background: #2d4a43;
+  color: #ffffff;
+  border-color: #2d4a43;
+}
+
+.settingsPrimaryBtn:hover:not(:disabled) {
+  background: #36584f;
+  border-color: #36584f;
+}
+
+.settingsPrimaryBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settingsSecondaryBtn {
+  background: transparent;
+  color: #b8c4ca;
+  border-color: var(--line);
+}
+
+.settingsSecondaryBtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.04);
+  color: #e3eaee;
+}
+
+.settingsSecondaryBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settingsSyncStatus {
+  font-size: 12px;
+  color: #8a949b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.settingsSyncStatus--ok {
+  color: #7ced8b;
+}
+
+.settingsSyncStatus--error {
+  color: #ed7c7c;
+}
+
+.settingsSyncProgress {
+  display: grid;
+  gap: 6px;
+}
+
+.settingsSyncProgressTrack {
+  height: 3px;
+  border-radius: 999px;
+  background: #273034;
+  overflow: hidden;
+}
+
+.settingsSyncProgressBar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2d4a43, #5ea38c);
+  transition: width 0.15s ease;
+}
+
+.settingsSyncProgressBar.indeterminate {
+  width: 36% !important;
+  animation: settingsUpdateIndeterminate 1.1s ease-in-out infinite;
+}
+
+.settingsSyncProgressLabel {
+  color: #b8c4ca;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settingsUsageTotalValue {
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.settingsUsageList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.settingsUsageRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.settingsUsageName {
+  color: #b8c4ca;
+}
+
+.settingsUsageValue {
+  color: #e6e8ea;
+  font-variant-numeric: tabular-nums;
 }

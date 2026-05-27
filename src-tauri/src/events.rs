@@ -151,3 +151,30 @@ pub(crate) fn emit_dependencies_ready(app: &AppHandle, key: &str, dependencies: 
         },
     );
 }
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncProgressPayload {
+    phase: String,
+    index: u32,
+    total: u32,
+    name: String,
+}
+
+pub(crate) fn emit_sync_progress(
+    app: &AppHandle,
+    phase: &str,
+    index: u32,
+    total: u32,
+    name: &str,
+) {
+    let _ = app.emit(
+        "sync-progress",
+        SyncProgressPayload {
+            phase: phase.to_string(),
+            index,
+            total,
+            name: name.to_string(),
+        },
+    );
+}

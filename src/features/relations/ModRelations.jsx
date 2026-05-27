@@ -4,6 +4,9 @@ import { LoaderCircle, Plus, Trash2 } from 'lucide-react';
 import { ModCover } from '../mods/ModCover.jsx';
 import { ModModalHead } from '../mods/ModModalHead.jsx';
 import { modModalSubtitle } from '../../lib/modMeta.jsx';
+import { DependencyModalBackdrop } from '../../components/DependencyModalBackdrop.jsx';
+import { ModalModNavRail } from '../../components/ModalModNavRail.jsx';
+import { getModalPortalRoot } from '../../lib/modalPortal.js';
 
 function relationsViewFor(hasDeps, hasUsed) {
   if (hasDeps && hasUsed) return 'dual';
@@ -36,7 +39,8 @@ export function ModRelations({
   onSelectMod,
   onOpenRelations,
   onCloseRelations,
-  relationsOpenKey
+  relationsOpenKey,
+  modNav
 }) {
   const relationsOpen = relationsOpenKey === currentMod.key;
   const [addOpen, setAddOpen] = useState(false);
@@ -195,7 +199,8 @@ export function ModRelations({
     modal === 'relations' && activeView === 'dual' ? (
       <div className="dependencyModalDual" onMouseDown={(event) => event.stopPropagation()}>
         <ModModalHead mod={currentMod} subtitle={modModalSubtitle(currentMod, { section: 'Связи' })} />
-        <div className="dependencyModalDualGrid" role="dialog" aria-modal="true" aria-label="Связи мода">
+        <ModalModNavRail modNav={modNav} uiLocked={busy}>
+          <div className="dependencyModalDualGrid" role="dialog" aria-modal="true" aria-label="Связи мода">
           <section className="dependencyModalPane">
             <header className="dependencyModalPaneHead">
               <span>Зависимости</span>
@@ -223,34 +228,37 @@ export function ModRelations({
             </header>
             <div className="dependencyModalPaneBody scrollArea">{renderUsedRows()}</div>
           </section>
-        </div>
+          </div>
+        </ModalModNavRail>
       </div>
     ) : modal === 'relations' && activeView === 'manage' ? (
       <div className="dependencyModalStack" onMouseDown={(event) => event.stopPropagation()}>
         <ModModalHead mod={currentMod} subtitle={modModalSubtitle(currentMod, { section: 'Зависимости' })} />
-        <div
-          className="dependencyModal dependencyModalManage dependencyModalWithAdd"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Зависимости мода"
-        >
-          {isOptional ? (
-            <p className="dependencyModalNote">
-              Мод не требуется для других модов и не является обязательным
-            </p>
-          ) : (
-            <div className="dependencyOptions scrollArea">{renderDepsRows()}</div>
-          )}
-          <button
-            type="button"
-            className="dependencyModalPaneAdd"
-            onClick={() => setModal('add')}
-            disabled={busy}
+        <ModalModNavRail modNav={modNav} uiLocked={busy}>
+          <div
+            className="dependencyModal dependencyModalManage dependencyModalWithAdd"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Зависимости мода"
           >
-            <Plus size={16} strokeWidth={2} />
-            Добавить
-          </button>
-        </div>
+            {isOptional ? (
+              <p className="dependencyModalNote">
+                Мод не требуется для других модов и не является обязательным
+              </p>
+            ) : (
+              <div className="dependencyOptions scrollArea">{renderDepsRows()}</div>
+            )}
+            <button
+              type="button"
+              className="dependencyModalPaneAdd"
+              onClick={() => setModal('add')}
+              disabled={busy}
+            >
+              <Plus size={16} strokeWidth={2} />
+              Добавить
+            </button>
+          </div>
+        </ModalModNavRail>
       </div>
     ) : modal === 'relations' && activeView === 'used' ? (
       <div className="dependencyModalStack" onMouseDown={(event) => event.stopPropagation()}>
@@ -259,14 +267,16 @@ export function ModRelations({
           subtitle={modModalSubtitle(currentMod, { section: 'Используется для' })}
           titleFirst
         />
-        <div
-          className="dependencyModal dependencyModalManage"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Используется для"
-        >
-          {hasUsed ? <div className="dependencyOptions scrollArea">{renderUsedRows()}</div> : null}
-        </div>
+        <ModalModNavRail modNav={modNav} uiLocked={busy}>
+          <div
+            className="dependencyModal dependencyModalManage"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Используется для"
+          >
+            {hasUsed ? <div className="dependencyOptions scrollArea">{renderUsedRows()}</div> : null}
+          </div>
+        </ModalModNavRail>
       </div>
     ) : null;
 
@@ -274,54 +284,56 @@ export function ModRelations({
     modal === 'add' ? (
       <div className="dependencyModalStack" onMouseDown={(event) => event.stopPropagation()}>
         <ModModalHead mod={currentMod} subtitle={modModalSubtitle(currentMod, { section: 'Зависимости' })} />
-        <div
-          className="dependencyModal dependencyModalAdd"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Добавить зависимость"
-        >
-          {isOptional && !showAddList ? (
-            <p className="dependencyModalNote">
-              Мод не требуется для других модов и не является обязательным
-            </p>
-          ) : null}
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Поиск мода"
-          />
-          {showAddList ? (
-            <div className="dependencyOptions scrollArea">
-              {dependencyOptions.length ? (
-                dependencyOptions.slice(0, 80).map((item) => (
-                  <div
-                    key={item.key}
-                    className="dependencyPickRow"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => addDependency(item.key)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        addDependency(item.key);
-                      }
-                    }}
-                  >
-                    <ModCover
-                      mod={item}
-                      size="tile"
-                      title="Выбрать мод"
-                      onClick={(event) => pickMod(event, item)}
-                    />
-                    <span>{item.displayName}</span>
-                  </div>
-                ))
-              ) : (
-                <span>Ничего не найдено</span>
-              )}
-            </div>
-          ) : null}
-        </div>
+        <ModalModNavRail modNav={modNav} uiLocked={busy}>
+          <div
+            className="dependencyModal dependencyModalAdd"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Добавить зависимость"
+          >
+            {isOptional && !showAddList ? (
+              <p className="dependencyModalNote">
+                Мод не требуется для других модов и не является обязательным
+              </p>
+            ) : null}
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Поиск мода"
+            />
+            {showAddList ? (
+              <div className="dependencyOptions scrollArea">
+                {dependencyOptions.length ? (
+                  dependencyOptions.slice(0, 80).map((item) => (
+                    <div
+                      key={item.key}
+                      className="dependencyPickRow"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => addDependency(item.key)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          addDependency(item.key);
+                        }
+                      }}
+                    >
+                      <ModCover
+                        mod={item}
+                        size="tile"
+                        title="Выбрать мод"
+                        onClick={(event) => pickMod(event, item)}
+                      />
+                      <span>{item.displayName}</span>
+                    </div>
+                  ))
+                ) : (
+                  <span>Ничего не найдено</span>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </ModalModNavRail>
       </div>
     ) : (
       relationsModal
@@ -329,41 +341,13 @@ export function ModRelations({
 
   const portal =
     modal && modalContent ? (
-      <div className="dependencyModalBackdrop" onMouseDown={closeModal}>
+      <DependencyModalBackdrop uiLocked={busy} onClose={closeModal}>
         {modalContent}
-      </div>
+      </DependencyModalBackdrop>
     ) : null;
 
   return (
     <>
-      {hasUsed ? (
-        <div className="controlGroup usedByGroup">
-          <label>
-            Используется для
-            <span className="usedByCount">{usedItems.length}</span>
-          </label>
-          <div className="dependencyTiles">
-            {usedItems.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                className="dependencyTile"
-                onClick={openRelations}
-                disabled={busy || assetsRefreshing}
-                title={item.displayName}
-              >
-                <ModCover mod={item} size="tile" />
-                {assetsRefreshing ? (
-                  <span className="relationTileSpinner" aria-hidden="true">
-                    <LoaderCircle size={18} className="spin" />
-                  </span>
-                ) : null}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
       <div className="controlGroup">
         <label>Зависимости</label>
         <div className="dependencyTiles">
@@ -396,7 +380,32 @@ export function ModRelations({
         </div>
       </div>
 
-      {portal ? createPortal(portal, document.body) : null}
+      {hasUsed ? (
+        <div className="controlGroup usedByGroup">
+          <label>Используется для</label>
+          <div className="dependencyTiles">
+            {usedItems.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className="dependencyTile"
+                onClick={openRelations}
+                disabled={busy || assetsRefreshing}
+                title={item.displayName}
+              >
+                <ModCover mod={item} size="tile" />
+                {assetsRefreshing ? (
+                  <span className="relationTileSpinner" aria-hidden="true">
+                    <LoaderCircle size={18} className="spin" />
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {portal ? createPortal(portal, getModalPortalRoot()) : null}
     </>
   );
 }

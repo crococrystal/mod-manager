@@ -1,46 +1,99 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { DependencyModalBackdrop } from '../../components/DependencyModalBackdrop.jsx';
+import { ModalModNavRail } from '../../components/ModalModNavRail.jsx';
+import { getModalPortalRoot } from '../../lib/modalPortal.js';
 import { modModalSubtitle } from '../../lib/modMeta.jsx';
 import { ModModalHead } from './ModModalHead.jsx';
 
-export function DescriptionDialog({ mod, busy, onClose, onSave }) {
+const SAVE_DELAY_MS = 400;
+
+export function DescriptionDialog({ mod, modNav, busy, savingKey, onClose, onSave }) {
   const [description, setDescription] = useState(mod?.description ?? '');
   const textareaRef = useRef(null);
+  const saveTimerRef = useRef(null);
+  const lastSavedRef = useRef('');
+  const modKeyRef = useRef(mod?.key);
+
+  modKeyRef.current = mod?.key;
 
   useEffect(() => {
-    setDescription(mod?.description ?? '');
+    const value = mod?.description ?? '';
+    setDescription(value);
+    lastSavedRef.current = value;
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   }, [mod?.key, mod?.description]);
 
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const flushSave = useCallback(async () => {
+    if (!modKeyRef.current) return;
+    if (saveTimerRef.current) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const value = textareaRef.current?.value ?? description;
+    if (value === lastSavedRef.current) return;
+    await onSave(modKeyRef.current, { description: value });
+    lastSavedRef.current = value;
+  }, [description, onSave]);
+
+  const scheduleSave = useCallback(
+    (value) => {
+      if (saveTimerRef.current) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+      saveTimerRef.current = window.setTimeout(() => {
+        saveTimerRef.current = null;
+        if (value === lastSavedRef.current || !modKeyRef.current) return;
+        void onSave(modKeyRef.current, { description: value }).then(() => {
+          lastSavedRef.current = value;
+        });
+      }, SAVE_DELAY_MS);
+    },
+    [onSave]
+  );
+
   if (!mod) return null;
 
-  async function save() {
-    await onSave(mod.key, { description });
+  const saving = savingKey === mod.key;
+  const uiLocked = busy || saving;
+
+  async function handleClose() {
+    if (uiLocked) return;
+    await flushSave();
     onClose();
   }
 
   return createPortal(
-    <div className="dependencyModalBackdrop" onMouseDown={() => !busy && onClose()}>
-      <div className="dependencyModalStack compactModalStack" onMouseDown={(event) => event.stopPropagation()}>
+    <DependencyModalBackdrop uiLocked={busy} onClose={() => void handleClose()}>
+      <div className="dependencyModalStack descriptionModalStack" onMouseDown={(event) => event.stopPropagation()}>
         <ModModalHead mod={mod} subtitle={modModalSubtitle(mod, { section: 'Описание' })} />
-        <div className="compactModal" role="dialog" aria-modal="true" aria-label="Описание мода">
+        <ModalModNavRail modNav={modNav} uiLocked={busy}>
           <textarea
             ref={textareaRef}
+            className="descriptionModalInput"
             value={description}
-            onChange={(event) => setDescription(event.target.value)}
+            onChange={(event) => {
+              const value = event.target.value;
+              setDescription(value);
+              scheduleSave(value);
+            }}
+            onBlur={() => void flushSave()}
+            disabled={busy}
             placeholder="Что это за мод, зачем он в сборке"
+            aria-label="Описание мода"
           />
-          <div className="compactModalActions">
-            <button type="button" className="button button-ghost" onClick={onClose} disabled={busy}>
-              Отмена
-            </button>
-            <button type="button" className="button" onClick={save} disabled={busy}>
-              Сохранить
-            </button>
-          </div>
-        </div>
+        </ModalModNavRail>
       </div>
-    </div>,
-    document.body
+    </DependencyModalBackdrop>,
+    getModalPortalRoot()
   );
 }
