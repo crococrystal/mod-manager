@@ -5,15 +5,15 @@ import modrinthIcon from '../assets/modrinth-icon.svg';
 
 export const sideOptions = [
   { id: 'client', icon: Monitor, label: 'Клиент', tone: 'client' },
-  { id: 'universal', icon: Globe2, label: 'Универсальный', tone: 'universal' },
+  { id: 'universal', icon: Globe2, label: 'Универсальные', tone: 'universal' },
   { id: 'server', icon: Server, label: 'Сервер', tone: 'server' }
 ];
 
 export const filters = [
   { id: 'all', label: 'Все' },
   ...sideOptions,
-  { id: 'library', icon: BookOpen, label: 'Библиотека', tone: 'library' },
-  { id: 'technical', icon: Wrench, label: 'Оптимизация', tone: 'technical' }
+  { id: 'library', icon: BookOpen, label: 'Библиотеки', tone: 'library' },
+  { id: 'technical', icon: Wrench, label: 'Оптимизации', tone: 'technical' }
 ];
 
 export const sourceIcons = {

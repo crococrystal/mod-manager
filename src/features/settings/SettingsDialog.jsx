@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Folder, FolderOpen, HardDrive, Info, RefreshCw, Settings2, Trash2 } from 'lucide-react';
+import { Folder, FolderOpen, HardDrive, Info, RefreshCw, Settings2, Trash2, TriangleAlert } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Button } from '../../components/Button.jsx';
 import { Modal } from '../../components/Modal.jsx';
 import { canCheckForUpdates } from '../../lib/updater.js';
-import { getDataUsage } from '../../api.js';
+import { getDataUsage, clearAppData } from '../../api.js';
 
 function toSettings(draft) {
   return {
@@ -53,11 +53,13 @@ function formatBytes(bytes) {
   return `${gb.toFixed(2)} GB`;
 }
 
-export function SettingsDialog({ settings, busy, syncing = false, onClose, onSave, onRunSync, updater }) {
+export function SettingsDialog({ settings, busy, syncing = false, onClose, onSave, onRunSync, onClearData, updater }) {
   const [tab, setTab] = useState('general');
   const [draft, setDraft] = useState(() => settings ?? {});
   const [message, setMessage] = useState('');
   const wasSyncingRef = useRef(false);
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const [syncOptions, setSyncOptions] = useState({
     identify: true,
@@ -169,10 +171,26 @@ export function SettingsDialog({ settings, busy, syncing = false, onClose, onSav
     }
   }
 
-  const uiBusy = packLocked || updateBusy;
-  const syncBusy = syncing || packLocked;
+  async function handleConfirmClear() {
+    if (clearing || packLocked) return;
+    setClearing(true);
+    try {
+      await clearAppData();
+      await refreshUsage();
+      setConfirmClearOpen(false);
+      await onClearData?.();
+    } catch (err) {
+      setMessage(String(err));
+    } finally {
+      setClearing(false);
+    }
+  }
+
+  const uiBusy = packLocked || updateBusy || clearing;
+  const syncBusy = syncing || packLocked || clearing;
 
   return (
+    <>
     <Modal
       ariaLabel="Настройки"
       onClose={onClose}
@@ -341,7 +359,16 @@ export function SettingsDialog({ settings, busy, syncing = false, onClose, onSav
                 <h3 className="settingsBlockTitle">Память</h3>
                 <p className="settingsBlockHint">Данные приложения на диске.</p>
               </div>
-              <span className="settingsUsageTotalValue">{formatBytes(usage?.total ?? 0)}</span>
+              <button
+                type="button"
+                className="settingsClearIconBtn"
+                onClick={() => setConfirmClearOpen(true)}
+                disabled={syncBusy}
+                title="Удалить все данные приложения"
+                aria-label="Удалить все данные приложения"
+              >
+                <Trash2 size={18} />
+              </button>
             </header>
 
             <ul className="settingsUsageList">
@@ -440,5 +467,53 @@ export function SettingsDialog({ settings, busy, syncing = false, onClose, onSav
         </div>
       )}
     </Modal>
+
+    {confirmClearOpen ? (
+      <Modal
+        size="narrow"
+        className="modalDangerConfirm"
+        ariaLabel="Удалить все данные?"
+        showClose={false}
+        onClose={() => {
+          if (!clearing) setConfirmClearOpen(false);
+        }}
+        footer={
+          <div className="dangerConfirmActions">
+            <button
+              type="button"
+              className="dangerConfirmBtn dangerConfirmBtnCancel"
+              onClick={() => setConfirmClearOpen(false)}
+              disabled={clearing}
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              className="dangerConfirmBtn dangerConfirmBtnDelete"
+              onClick={handleConfirmClear}
+              disabled={clearing}
+            >
+              {clearing ? 'Удаление…' : 'Удалить всё'}
+            </button>
+          </div>
+        }
+      >
+        <div className="dangerConfirm">
+          <div className="dangerConfirmIcon" aria-hidden="true">
+            <TriangleAlert size={26} strokeWidth={2.2} />
+          </div>
+          <h3 className="dangerConfirmTitle">Удалить все данные?</h3>
+          <p className="dangerConfirmText">
+            Будут удалены метки, описания, привязки к Modrinth и CurseForge, связи между модами и
+            обложки для всех известных сборок.
+          </p>
+          <p className="dangerConfirmNote">
+            Jar-файлы модов и настройки приложения не затронутся. Привязки хранятся в данных Mod
+            Manager, а не внутри jar.
+          </p>
+        </div>
+      </Modal>
+    ) : null}
+    </>
   );
 }

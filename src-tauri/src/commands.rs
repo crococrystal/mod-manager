@@ -831,9 +831,15 @@ pub(crate) fn get_data_usage(app: AppHandle) -> Result<DataUsageResult, String> 
 pub(crate) fn clear_app_data(app: AppHandle) -> Result<instance_registry::ClearDataResult, String> {
     let settings = read_settings(&app)?;
     let mut data_roots = Vec::new();
-    if let Ok(paths) = resolve_paths(&settings) {
-        data_roots.push(paths.data_root);
+
+    if let Some(instance_root) = settings.instance_root.as_deref() {
+        data_roots.push(std::path::PathBuf::from(instance_root).join(".mod-manager"));
     }
+
+    for instance_root in &settings.recent_instances {
+        data_roots.push(std::path::PathBuf::from(instance_root).join(".mod-manager"));
+    }
+
     instance_registry::clear_all(&app, data_roots)
 }
 

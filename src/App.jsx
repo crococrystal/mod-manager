@@ -774,6 +774,26 @@ function App() {
     [applyPayload]
   );
 
+  const handleClearData = useCallback(async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const saved = await getSettings();
+      setSettings(saved);
+      if (saved.instanceRoot) {
+        const next = await scanMods();
+        applyPayload(next);
+        void runBootstrap(saved.cacheStatus, { force: true });
+      }
+      setInfo('Данные приложения удалены.');
+    } catch (err) {
+      setError(String(err));
+      throw err;
+    } finally {
+      setBusy(false);
+    }
+  }, [applyPayload, runBootstrap]);
+
   const handleCancelProgress = useCallback(() => {
     if (!bootstrapping && !syncing) return;
     bootstrapRunRef.current += 1;
@@ -1127,6 +1147,7 @@ function App() {
           onClose={() => setSettingsOpen(false)}
           onSave={handleSaveSettings}
           onRunSync={handleRunSync}
+          onClearData={handleClearData}
         />
       ) : null}
 

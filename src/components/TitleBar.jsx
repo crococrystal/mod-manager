@@ -74,6 +74,8 @@ function WindowControls() {
 }
 
 export function TitleBar({ children }) {
+  const [macFullscreen, setMacFullscreen] = useState(false);
+
   useEffect(() => {
     if (useCustomChrome) {
       void applyCustomChrome();
@@ -84,10 +86,37 @@ export function TitleBar({ children }) {
     }
   }, []);
 
+  useEffect(() => {
+    if (!isMac || useCustomChrome) return undefined;
+
+    const win = getCurrentWindow();
+    let unlisten;
+
+    const refreshFullscreen = () => {
+      win
+        .isFullscreen()
+        .then(setMacFullscreen)
+        .catch(() => setMacFullscreen(false));
+    };
+
+    refreshFullscreen();
+    win
+      .onResized(refreshFullscreen)
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
+
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
   const titleBarClass = useCustomChrome ? 'titleBarWindows' : isMac ? 'titleBarMac' : 'titleBarOther';
+  const fullscreenClass = isMac && !useCustomChrome && macFullscreen ? ' titleBarMacFullscreen' : '';
 
   return (
-    <header className={`titleBar ${titleBarClass}`} data-tauri-drag-region>
+    <header className={`titleBar ${titleBarClass}${fullscreenClass}`} data-tauri-drag-region>
       <div className="titleBarSpacer" data-tauri-drag-region aria-hidden="true" />
       <div className="titleBarContent" data-tauri-drag-region>
         {children}

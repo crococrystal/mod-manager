@@ -136,7 +136,7 @@ export function TagsDialog({
                   void apply({ library: !tags.library, sideMode: 'manual' });
                 }}
                 disabled={uiLocked}
-                title="Библиотека"
+                title="Библиотеки"
               >
                 <BookOpen className="tagIcon library" size={24} />
               </button>
@@ -148,7 +148,7 @@ export function TagsDialog({
                   void apply({ technical: !tags.technical, sideMode: 'manual' });
                 }}
                 disabled={uiLocked}
-                title="Оптимизация"
+                title="Оптимизации"
               >
                 <Wrench className="tagIcon technical" size={24} />
               </button>

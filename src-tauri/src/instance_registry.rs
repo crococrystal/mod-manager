@@ -244,7 +244,7 @@ pub fn clear_all(
     data_roots.sort();
     data_roots.dedup();
     for data_root in data_roots {
-        if clear_instance_downloads(&data_root)? {
+        if clear_instance_data(&data_root)? {
             cleared_instance_dirs += 1;
         }
     }
@@ -269,21 +269,31 @@ pub fn clear_all(
     })
 }
 
-fn clear_instance_downloads(data_root: &Path) -> Result<bool, String> {
+fn clear_instance_data(data_root: &Path) -> Result<bool, String> {
     if !data_root.exists() {
         return Ok(false);
     }
+
     let mut touched = false;
-    for sub in ["cache", "covers/cache"] {
+
+    let tags_path = data_root.join("mod-tags.json");
+    if tags_path.exists() {
+        fs::remove_file(&tags_path).map_err(|e| e.to_string())?;
+        touched = true;
+    }
+
+    for sub in ["cache", "covers"] {
         let path = data_root.join(sub);
         if path.exists() {
             fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
             touched = true;
         }
     }
-    let _ = fs::create_dir_all(data_root.join("covers/cache"));
-    let _ = fs::create_dir_all(data_root.join("covers/manual"));
-    let _ = fs::create_dir_all(data_root.join("cache"));
+
+    fs::create_dir_all(data_root.join("covers/cache")).map_err(|e| e.to_string())?;
+    fs::create_dir_all(data_root.join("covers/manual")).map_err(|e| e.to_string())?;
+    fs::create_dir_all(data_root.join("cache")).map_err(|e| e.to_string())?;
+
     Ok(touched)
 }
 
