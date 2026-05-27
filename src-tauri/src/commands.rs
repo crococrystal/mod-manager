@@ -1,27 +1,30 @@
 use std::path::PathBuf;
 
 use base64::{engine::general_purpose, Engine};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::bootstrap::{bootstrap_still_active, cancel_active_bootstrap};
 use crate::catalog;
-use crate::covers::{cover_ext_from_mime, delete_manual_cover, store_uploaded_cover};
+use crate::covers::{
+    cover_ext_from_mime, delete_manual_cover, fetch_mod_cover, store_uploaded_cover,
+};
+use crate::dependencies::same_dependency_list;
 use crate::instance_registry;
-use crate::mods::{normalize_side, scan_mods_for_settings, stats_for, ModListPayload};
+use crate::mods::{merge_keys, normalize_side, scan_mods_for_settings, stats_for, ModListPayload};
 use crate::mods_watch;
-use crate::prefetch::prefetch_mod_assets_for_settings;
+use crate::prefetch::{identify_unknown_sources, prefetch_mod_assets_for_settings};
 use crate::providers::{
     InstallProviderVersionRequest, InstallProviderVersionResult, ListProviderVersionsRequest,
     ProviderVersionsPayload, SearchProviderRequest, SwitchModSourceRequest, SwitchModSourceResult,
 };
-use crate::remote::ProviderCandidate;
+use crate::remote::{fetch_api_dependencies, http_client, ProviderCandidate};
 use crate::settings::{
     read_settings, remember_instance, resolve_paths, settings_view, write_settings, Settings,
     SettingsView,
 };
 use crate::tags::{read_tags, write_tags};
-use crate::util::now_iso;
+use crate::util::{file_mtime_millis, now_iso, path_string};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +35,24 @@ pub(crate) struct UpdateModTagsRequest {
     pub technical: Option<bool>,
     pub description: Option<String>,
     pub dependencies: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RefreshModAssetsRequest {
+    pub key: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RefreshModAssetsResult {
+    pub key: String,
+    pub dependencies: Vec<String>,
+    pub resolved_dependencies: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_modified_at: Option<u64>,
 }
 
 fn absolute_path(path: PathBuf) -> PathBuf {
@@ -68,7 +89,8 @@ pub(crate) fn save_settings(
     mut settings: Settings,
 ) -> Result<SettingsView, String> {
     let previous = read_settings(&app).ok();
-    let instance_changed = previous.as_ref().map(|item| &item.instance_root) != Some(&settings.instance_root);
+    let instance_changed =
+        previous.as_ref().map(|item| &item.instance_root) != Some(&settings.instance_root);
 
     if let Some(root) = settings.instance_root.clone() {
         remember_instance(&mut settings, &root);
@@ -101,6 +123,126 @@ pub(crate) async fn scan_mods(app: AppHandle) -> Result<ModListPayload, String> 
         mods,
         stats,
     })
+}
+
+#[tauri::command]
+pub(crate) async fn identify_mod_sources(app: AppHandle) -> Result<ModListPayload, String> {
+    let settings = read_settings(&app)?;
+    let paths = resolve_paths(&settings)?;
+    let view = settings_view(&app, settings.clone())?;
+    let catalog_root = catalog::catalog_root(&app).ok();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut mods = scan_mods_for_settings(&settings, catalog_root.clone())?;
+        let Some(client) = http_client() else {
+            return Err("Не удалось создать HTTP-клиент.".to_string());
+        };
+        let mut tags = read_tags(&paths.tags_path)?;
+        if identify_unknown_sources(&settings, &client, &paths, &mut tags, &mods)? {
+            write_tags(&paths.tags_path, &tags)?;
+            mods = scan_mods_for_settings(&settings, catalog_root)?;
+        }
+        let stats = stats_for(&mods);
+        Ok(ModListPayload {
+            settings: view,
+            mods,
+            stats,
+        })
+    })
+    .await
+    .map_err(|error| format!("Определение поставщиков прервано: {error}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn refresh_mod_assets(
+    app: AppHandle,
+    request: RefreshModAssetsRequest,
+) -> Result<RefreshModAssetsResult, String> {
+    let settings = read_settings(&app)?;
+    let paths = resolve_paths(&settings)?;
+    let catalog_root = catalog::catalog_root(&app).ok();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(client) = http_client() else {
+            return Err("Не удалось создать HTTP-клиент.".to_string());
+        };
+
+        let mods = scan_mods_for_settings(&settings, catalog_root.clone())?;
+        let Some(item) = mods.iter().find(|entry| entry.key == request.key).cloned() else {
+            return Err("Мод не найден.".to_string());
+        };
+
+        let modrinth_lookup = mods
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .modrinth_id
+                    .as_ref()
+                    .map(|id| (id.clone(), entry.key.clone()))
+            })
+            .collect();
+        let curseforge_lookup = mods
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .curseforge_id
+                    .as_ref()
+                    .map(|id| (id.clone(), entry.key.clone()))
+            })
+            .collect();
+
+        let mut refreshed_settings = settings.clone();
+        refreshed_settings.auto_prefetch_dependencies = true;
+
+        let keys = fetch_api_dependencies(
+            &item,
+            &client,
+            &refreshed_settings,
+            &modrinth_lookup,
+            &curseforge_lookup,
+        );
+        let mut tags = read_tags(&paths.tags_path)?;
+        let current = tags.mods.entry(item.key.clone()).or_default();
+        let previous = current.dependencies.clone();
+        let dependencies = merge_keys(&[&previous, &keys]);
+        if !same_dependency_list(&previous, &dependencies) {
+            current.dependencies = dependencies.clone();
+            current.updated_at = now_iso();
+            tags.updated_at = now_iso();
+            write_tags(&paths.tags_path, &tags)?;
+        }
+
+        let (cover_path, cover_modified_at) =
+            if !item.cover_manual && (item.modrinth_id.is_some() || item.curseforge_id.is_some()) {
+                if let Some(path) = fetch_mod_cover(
+                    &client,
+                    &paths,
+                    catalog_root.as_deref(),
+                    &item,
+                    &settings,
+                    true,
+                ) {
+                    let mtime = file_mtime_millis(&path);
+                    (Some(path_string(path)), mtime)
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+
+        let resolved_dependencies = merge_keys(&[&dependencies, &item.jar_dependencies]);
+
+        Ok(RefreshModAssetsResult {
+            key: item.key,
+            resolved_dependencies,
+            dependencies,
+            cover_path,
+            cover_modified_at,
+        })
+    })
+    .await
+    .map_err(|error| format!("Обновление данных мода прервано: {error}"))?
 }
 
 #[tauri::command]

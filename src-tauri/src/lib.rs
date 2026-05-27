@@ -61,6 +61,8 @@ pub fn run() {
             commands::get_settings,
             commands::save_settings,
             commands::scan_mods,
+            commands::identify_mod_sources,
+            commands::refresh_mod_assets,
             commands::bootstrap_instance,
             commands::clear_app_data,
             commands::update_mod_tags,

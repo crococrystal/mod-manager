@@ -7,6 +7,8 @@ import {
   copyModFiles,
   deleteCustomCover,
   getSettings,
+  identifyModSources,
+  refreshModAssets,
   saveSettings,
   scanMods,
   updateModTags,
@@ -175,11 +177,13 @@ function App() {
   const [tagsAnchor, setTagsAnchor] = useState(null);
   const [tagsSavingKey, setTagsSavingKey] = useState(null);
   const [descriptionKey, setDescriptionKey] = useState(null);
+  const [refreshingAssetsKey, setRefreshingAssetsKey] = useState(null);
   const [sort, setSort] = useState({ key: 'name', direction: 'asc' });
   const watcherReloadingRef = useRef(false);
   const watcherReloadPendingRef = useRef(false);
   const selectionAnchorRef = useRef(null);
   const bootstrapRunRef = useRef(0);
+  const sourceIdentifyRunRef = useRef(0);
   const startupUpdateCheckedRef = useRef(false);
   const updater = useAppUpdater();
 
@@ -470,7 +474,12 @@ function App() {
   const handleSaveSettings = useCallback(
     async (nextSettings, options = {}) => {
       const instanceChanged = nextSettings.instanceRoot !== (settings?.instanceRoot ?? null);
+      const previousCurseForgeKey = (settings?.curseforgeApiKey ?? '').trim();
+      const nextCurseForgeKey = (nextSettings.curseforgeApiKey ?? '').trim();
+      const curseForgeKeyChanged =
+        Boolean(nextCurseForgeKey) && previousCurseForgeKey !== nextCurseForgeKey;
       if (instanceChanged) {
+        sourceIdentifyRunRef.current += 1;
         setProgress(null);
       }
       setBusy(true);
@@ -478,14 +487,34 @@ function App() {
       try {
         const saved = await saveSettings(nextSettings);
         setSettings(saved);
+        const shouldRefreshProviderLinks = Boolean(saved.instanceRoot && curseForgeKeyChanged);
+        let providerLinksCoveredByBootstrap = false;
         if (options.scan !== false && saved.instanceRoot) {
           const next = await scanMods();
           applyPayload(next);
           if (options.bootstrap && saved.instanceRoot) {
-            void runBootstrap(saved.cacheStatus, { force: options.forceBootstrap });
+            providerLinksCoveredByBootstrap = needsBootstrap(saved.cacheStatus, {
+              force: options.forceBootstrap
+            });
+            if (providerLinksCoveredByBootstrap) {
+              void runBootstrap(saved.cacheStatus, { force: options.forceBootstrap });
+            }
           } else if (needsBootstrap(saved.cacheStatus)) {
+            providerLinksCoveredByBootstrap = true;
             void runBootstrap(saved.cacheStatus);
           }
+        }
+        if (shouldRefreshProviderLinks && !providerLinksCoveredByBootstrap) {
+          const runId = ++sourceIdentifyRunRef.current;
+          void identifyModSources()
+            .then((next) => {
+              if (runId !== sourceIdentifyRunRef.current) return;
+              applyPayload(next);
+            })
+            .catch((err) => {
+              if (runId !== sourceIdentifyRunRef.current) return;
+              setError(String(err));
+            });
         }
       } catch (err) {
         setError(String(err));
@@ -493,7 +522,7 @@ function App() {
         setBusy(false);
       }
     },
-    [applyPayload, runBootstrap, settings?.instanceRoot]
+    [applyPayload, runBootstrap, settings?.curseforgeApiKey, settings?.instanceRoot]
   );
 
   const patchMod = useCallback(
@@ -558,6 +587,35 @@ function App() {
       }
     },
     [applyPayload]
+  );
+
+  const handleRefreshModAssets = useCallback(
+    async (key) => {
+      setRefreshingAssetsKey(key);
+      setError('');
+      try {
+        const result = await refreshModAssets(key);
+        const patch = {
+          dependencies: result.dependencies ?? [],
+          resolvedDependencies: result.resolvedDependencies ?? result.dependencies ?? []
+        };
+        if (result.coverPath) {
+          patch.coverPath = result.coverPath;
+          patch.coverModifiedAt = result.coverModifiedAt ?? null;
+          patch.coverManual = false;
+          patch.coverUrl = coverUrlFor({
+            coverPath: result.coverPath,
+            coverModifiedAt: result.coverModifiedAt
+          });
+        }
+        updateModInPayload(key, patch);
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setRefreshingAssetsKey((current) => (current === key ? null : current));
+      }
+    },
+    [updateModInPayload]
   );
 
   const handleProviderApplied = useCallback(
@@ -819,6 +877,8 @@ function App() {
                   onPatch={patchMod}
                   onUploadCover={handleUploadCover}
                   onDeleteCover={handleDeleteCover}
+                  onRefreshAssets={handleRefreshModAssets}
+                  assetsRefreshing={refreshingAssetsKey === selected.key}
                   relationsOpenKey={relationsKey}
                   onOpenRelations={openRelationsForMod}
                   onCloseRelations={closeRelations}
@@ -857,14 +917,6 @@ function App() {
           updater={updater}
           onClose={() => setSettingsOpen(false)}
           onSave={handleSaveSettings}
-          onCleared={async () => {
-            const next = await getSettings();
-            setSettings(next);
-            if (next.instanceRoot) {
-              await reload();
-              void runBootstrap(next.cacheStatus, { force: true });
-            }
-          }}
         />
       ) : null}
 

@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Folder, FolderOpen, Info, RefreshCw, Trash2 } from 'lucide-react';
+import { Folder, FolderOpen, Info, Trash2 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Button } from '../../components/Button.jsx';
 import { Modal } from '../../components/Modal.jsx';
-import { NoticeModal } from '../../components/NoticeModal.jsx';
-import { clearAppData } from '../../api.js';
 import { canCheckForUpdates } from '../../lib/updater.js';
 
 function toSettings(draft) {
@@ -39,13 +37,11 @@ function updateProgressLabel(progress) {
   return 'Загрузка…';
 }
 
-export function SettingsDialog({ settings, busy, onClose, onSave, onCleared, updater }) {
+export function SettingsDialog({ settings, busy, onClose, onSave, updater }) {
   const [draft, setDraft] = useState(() => settings ?? {});
   const [message, setMessage] = useState('');
-  const [clearConfirm, setClearConfirm] = useState(null);
-  const [clearing, setClearing] = useState(false);
 
-  const packLocked = busy || clearing;
+  const packLocked = busy;
   const recent = useMemo(() => {
     const list = settings?.recentInstances ?? [];
     return list.filter((item) => item && item !== draft.instanceRoot);
@@ -104,21 +100,6 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared, upd
     await openUrl('https://console.curseforge.com/?#/api-keys');
   }
 
-  async function confirmClear() {
-    setClearing(true);
-    setMessage('');
-    try {
-      await clearAppData();
-      setClearConfirm(null);
-      await onCleared?.();
-      onClose?.();
-    } catch (err) {
-      setMessage(`Не удалось обновить данные: ${err}`);
-    } finally {
-      setClearing(false);
-    }
-  }
-
   async function saveAutoCheckUpdates(enabled) {
     const next = { ...draft, autoCheckUpdates: enabled };
     setDraft(next);
@@ -132,19 +113,6 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared, upd
     <Modal
       title="Настройки"
       onClose={onClose}
-      footer={(
-        <div className="settingsFooter">
-          <Button
-            icon={RefreshCw}
-            onClick={() => setClearConfirm('Заново загрузить обложки и\u00a0зависимости?')}
-            disabled={uiBusy}
-            tone="ghost"
-            className="settingsFooterBtn"
-          >
-            Обновить данные
-          </Button>
-        </div>
-      )}
     >
       <div className="settingsMinimal">
         <div className="field">
@@ -273,21 +241,6 @@ export function SettingsDialog({ settings, busy, onClose, onSave, onCleared, upd
 
         {message ? <p className="settingsMessage">{message}</p> : null}
       </div>
-
-      {clearConfirm ? (
-        <NoticeModal
-          tone="bad"
-          message={clearConfirm}
-          onClose={() => !clearing && setClearConfirm(null)}
-          confirm={{
-            confirmLabel: clearing ? 'Обновляем…' : 'Обновить',
-            cancelLabel: 'Отмена',
-            busy: clearing,
-            onConfirm: confirmClear,
-            onCancel: () => setClearConfirm(null)
-          }}
-        />
-      ) : null}
     </Modal>
   );
 }

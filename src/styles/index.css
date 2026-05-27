@@ -1421,10 +1421,15 @@ aside {
   position: relative;
 }
 
-.coverResetIcon {
+.coverActionStack {
   position: absolute;
   top: 6px;
   right: 6px;
+  display: flex;
+  gap: 6px;
+}
+
+.coverActionIcon {
   width: 26px;
   height: 26px;
   display: inline-flex;
@@ -1441,14 +1446,27 @@ aside {
   transition: background 120ms ease, color 120ms ease;
 }
 
-.coverResetIcon:hover:not(:disabled) {
+.coverActionIcon:hover:not(:disabled) {
   background: rgba(15, 18, 22, 0.92);
   color: #ffffff;
 }
 
-.coverResetIcon:disabled {
+.coverActionIcon:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.assetLoadingOverlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgb(16 20 22 / 0.42);
+  color: #d7f7ea;
+  pointer-events: none;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
 }
 
 .modPageLink {
@@ -1662,6 +1680,7 @@ textarea:focus {
 }
 
 .dependencyTile {
+  position: relative;
   display: block;
   padding: 0;
   border: 0;
@@ -1698,6 +1717,17 @@ textarea:focus {
   border-style: solid;
   color: #e6e8ea;
   background: #1a2226;
+}
+
+.relationTileSpinner {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: rgb(16 20 22 / 0.48);
+  color: #d7f7ea;
+  pointer-events: none;
 }
 
 .dependencyModalBackdrop {

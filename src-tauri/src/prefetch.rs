@@ -28,7 +28,7 @@ struct PendingIdentity {
     curseforge_fingerprint: u32,
 }
 
-fn identify_unknown_sources(
+pub(crate) fn identify_unknown_sources(
     settings: &Settings,
     client: &reqwest::blocking::Client,
     paths: &crate::settings::InstancePaths,
@@ -200,7 +200,15 @@ pub(crate) fn prefetch_mod_assets_for_settings(
             } else {
                 did_work = true;
                 if !progress_started {
-                    emit_prefetch_progress(app, "mods", step, total, &item.display_name, "fetch", "");
+                    emit_prefetch_progress(
+                        app,
+                        "mods",
+                        step,
+                        total,
+                        &item.display_name,
+                        "fetch",
+                        "",
+                    );
                 }
                 let keys = fetch_api_dependencies(
                     item,

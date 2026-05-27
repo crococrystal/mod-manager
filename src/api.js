@@ -12,6 +12,14 @@ export function scanMods() {
   return invoke('scan_mods');
 }
 
+export function identifyModSources() {
+  return invoke('identify_mod_sources');
+}
+
+export function refreshModAssets(key) {
+  return invoke('refresh_mod_assets', { request: { key } });
+}
+
 export function bootstrapInstance(force = false) {
   return invoke('bootstrap_instance', { force });
 }

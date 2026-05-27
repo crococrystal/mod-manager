@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Trash2 } from 'lucide-react';
+import { LoaderCircle, Plus, Trash2 } from 'lucide-react';
 import { ModCover } from '../mods/ModCover.jsx';
 import { ModModalHead } from '../mods/ModModalHead.jsx';
 import { modModalSubtitle } from '../../lib/modMeta.jsx';
@@ -31,6 +31,7 @@ export function ModRelations({
   usedBy,
   mods,
   busy,
+  assetsRefreshing = false,
   onChange,
   onSelectMod,
   onOpenRelations,
@@ -348,9 +349,15 @@ export function ModRelations({
                 type="button"
                 className="dependencyTile"
                 onClick={openRelations}
+                disabled={busy || assetsRefreshing}
                 title={item.displayName}
               >
                 <ModCover mod={item} size="tile" />
+                {assetsRefreshing ? (
+                  <span className="relationTileSpinner" aria-hidden="true">
+                    <LoaderCircle size={18} className="spin" />
+                  </span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -366,10 +373,15 @@ export function ModRelations({
               type="button"
               className="dependencyTile"
               onClick={openRelations}
-              disabled={busy}
+              disabled={busy || assetsRefreshing}
               title={item.displayName}
             >
               <ModCover mod={item} size="tile" />
+              {assetsRefreshing ? (
+                <span className="relationTileSpinner" aria-hidden="true">
+                  <LoaderCircle size={18} className="spin" />
+                </span>
+              ) : null}
             </button>
           ))}
           <button

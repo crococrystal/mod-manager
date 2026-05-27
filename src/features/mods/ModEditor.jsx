@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RotateCcw } from 'lucide-react';
+import { LoaderCircle, RefreshCw, RotateCcw } from 'lucide-react';
 import { mergeDependencyKeys } from '../../lib/usedBy.js';
 import { ModRelations } from '../relations/ModRelations.jsx';
 import { ModCover } from './ModCover.jsx';
@@ -11,6 +11,8 @@ export function ModEditor({
   onPatch,
   onUploadCover,
   onDeleteCover,
+  onRefreshAssets,
+  assetsRefreshing = false,
   onSelectMod,
   onOpenRelations,
   onCloseRelations,
@@ -60,23 +62,45 @@ export function ModEditor({
             mod={mod}
             size="hero"
             title="Нажми, чтобы загрузить обложку"
-            onClick={() => !busy && coverInputRef.current?.click()}
+            onClick={() => !busy && !assetsRefreshing && coverInputRef.current?.click()}
           />
-          {mod.coverManual && onDeleteCover ? (
-            <button
-              type="button"
-              className="coverResetIcon"
-              onClick={(event) => {
-                event.stopPropagation();
-                onDeleteCover(mod.key);
-              }}
-              disabled={busy}
-              title="Сбросить кастомную обложку"
-              aria-label="Сбросить кастомную обложку"
-            >
-              <RotateCcw size={14} />
-            </button>
+          {assetsRefreshing ? (
+            <div className="assetLoadingOverlay" aria-hidden="true">
+              <LoaderCircle size={32} className="spin" />
+            </div>
           ) : null}
+          <div className="coverActionStack">
+            {onRefreshAssets ? (
+              <button
+                type="button"
+                className="coverActionIcon"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRefreshAssets(mod.key);
+                }}
+                disabled={busy || assetsRefreshing}
+                title="Обновить обложку и зависимости"
+                aria-label="Обновить обложку и зависимости"
+              >
+                <RefreshCw size={14} className={assetsRefreshing ? 'spin' : ''} />
+              </button>
+            ) : null}
+            {mod.coverManual && onDeleteCover ? (
+              <button
+                type="button"
+                className="coverActionIcon"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDeleteCover(mod.key);
+                }}
+                disabled={busy || assetsRefreshing}
+                title="Сбросить кастомную обложку"
+                aria-label="Сбросить кастомную обложку"
+              >
+                <RotateCcw size={14} />
+              </button>
+            ) : null}
+          </div>
         </div>
         <h2>{mod.displayName}</h2>
         <input ref={coverInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={uploadCover} hidden />
@@ -90,6 +114,7 @@ export function ModEditor({
         usedBy={usedBy}
         mods={mods}
         busy={busy}
+        assetsRefreshing={assetsRefreshing}
         onChange={handleDependenciesChange}
         onSelectMod={onSelectMod}
         onOpenRelations={onOpenRelations}
