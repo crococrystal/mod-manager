@@ -1,9 +1,5 @@
 use serde::Serialize;
-use std::{
-    collections::HashMap,
-    fs,
-    path::Path,
-};
+use std::{collections::HashMap, fs, path::Path};
 
 use crate::{
     mod_names::{loader_hint_from_filename, minecraft_version_hint_from_filename},

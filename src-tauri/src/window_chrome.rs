@@ -7,7 +7,9 @@ pub fn attach(window: &WebviewWindow) {
     let _ = window.clone().on_window_event(move |event| {
         if matches!(
             event,
-            WindowEvent::Resized(_) | WindowEvent::Moved(_) | WindowEvent::ScaleFactorChanged { .. }
+            WindowEvent::Resized(_)
+                | WindowEvent::Moved(_)
+                | WindowEvent::ScaleFactorChanged { .. }
         ) {
             invalidate(&window);
 

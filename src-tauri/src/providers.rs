@@ -354,29 +354,29 @@ fn complete_switch_identity(
     if !followup.filename.is_empty() {
         if let Some(jar_path) = followup.paths.resolve_mod_jar(&followup.filename) {
             if let Ok(identity) = read_file_identity(&jar_path) {
-            match followup.source.as_str() {
-                "modrinth" => {
-                    if let Some(found) = modrinth_version_by_sha512(client, &identity.sha512) {
-                        if found.project_id == followup.project_id {
-                            modrinth_version_id = Some(found.version_id);
-                        }
-                    }
-                }
-                "curseforge" => {
-                    if !followup.settings.curseforge_api_key.trim().is_empty() {
-                        if let Some(found) = curseforge_fingerprint_match(
-                            client,
-                            &followup.settings.curseforge_api_key,
-                            identity.curseforge_fingerprint,
-                        ) {
+                match followup.source.as_str() {
+                    "modrinth" => {
+                        if let Some(found) = modrinth_version_by_sha512(client, &identity.sha512) {
                             if found.project_id == followup.project_id {
-                                curseforge_file_id = Some(found.file_id);
+                                modrinth_version_id = Some(found.version_id);
                             }
                         }
                     }
+                    "curseforge" => {
+                        if !followup.settings.curseforge_api_key.trim().is_empty() {
+                            if let Some(found) = curseforge_fingerprint_match(
+                                client,
+                                &followup.settings.curseforge_api_key,
+                                identity.curseforge_fingerprint,
+                            ) {
+                                if found.project_id == followup.project_id {
+                                    curseforge_file_id = Some(found.file_id);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
             }
         }
     }

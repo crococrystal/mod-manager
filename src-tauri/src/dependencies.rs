@@ -19,7 +19,11 @@ pub(crate) fn apply_jar_dependencies(
         .collect();
     let cache_path = paths.data_root.join("cache").join("jar-dependencies.json");
     let map = jar_deps::jar_info_for_mods(
-        |filename| paths.resolve_mod_jar(filename).unwrap_or_else(|| paths.mods_dir.join(filename)),
+        |filename| {
+            paths
+                .resolve_mod_jar(filename)
+                .unwrap_or_else(|| paths.mods_dir.join(filename))
+        },
         &cache_path,
         &refs,
     )?;

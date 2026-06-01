@@ -5,10 +5,10 @@ use tauri::AppHandle;
 use crate::bootstrap::ensure_task_active;
 
 use crate::catalog;
+use crate::covers::cache_remote_cover;
 use crate::dependencies::{
     filter_reverse_jar_dependency_keys, jar_dependencies_by_key, same_dependency_list,
 };
-use crate::covers::cache_remote_cover;
 use crate::events::{
     emit_cover_ready, emit_dependencies_ready, emit_labels_ready, emit_prefetch_done,
     emit_prefetch_progress,
@@ -243,13 +243,12 @@ pub(crate) fn sync_mods_unified(
         let run_cf_versions = has_cf_key && need_versions;
 
         let (mr_p, mr_v, cf_m, cf_f) = std::thread::scope(|scope| {
-            let mr_p_handle = scope.spawn(move || {
-                modrinth_projects_batch(client_ref, &modrinth_project_ids)
-            });
+            let mr_p_handle =
+                scope.spawn(move || modrinth_projects_batch(client_ref, &modrinth_project_ids));
             let mr_v_handle = if run_versions {
-                Some(scope.spawn(move || {
-                    modrinth_versions_batch(client_ref, &modrinth_version_ids)
-                }))
+                Some(
+                    scope.spawn(move || modrinth_versions_batch(client_ref, &modrinth_version_ids)),
+                )
             } else {
                 None
             };
@@ -391,8 +390,7 @@ pub(crate) fn sync_mods_unified(
                 // а не дефолтный "universal". Если пользователь уже что-то трогал —
                 // ручные значения не перезаписываем.
                 let provider_was_empty = tag.provider_labels.fetched_at.is_empty();
-                let manual_was_empty =
-                    tag.side.is_empty() && !tag.library && !tag.technical;
+                let manual_was_empty = tag.side.is_empty() && !tag.library && !tag.technical;
 
                 tag.provider_labels = store;
                 tag.updated_at = now_iso();

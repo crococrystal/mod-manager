@@ -100,7 +100,9 @@ pub fn display_name_for(instance_root: &Path) -> String {
         .to_string()
 }
 
-pub fn mods_fingerprint_dirs(dirs: impl IntoIterator<Item = impl AsRef<Path>>) -> Result<String, String> {
+pub fn mods_fingerprint_dirs(
+    dirs: impl IntoIterator<Item = impl AsRef<Path>>,
+) -> Result<String, String> {
     let mut parts = Vec::new();
     for mods_dir in dirs {
         let mods_dir = mods_dir.as_ref();

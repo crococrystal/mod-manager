@@ -8,11 +8,11 @@ use std::{
 use crate::covers::apply_existing_cover;
 use crate::dependencies::{apply_jar_dependencies, prune_reverse_jar_dependencies};
 use crate::mod_names::{display_name_from_filename, installed_version_from_filename};
-use crate::settings::{resolve_paths, Settings, SettingsView};
 use crate::provider_labels::{
     manual_tags_for, provider_tags_for, resolve_library, resolve_side, resolve_technical,
     side_mode_for,
 };
+use crate::settings::{resolve_paths, select_canonical_mod_jar, Settings, SettingsView};
 use crate::tags::{read_tags, write_tags, ModTags, TagFile};
 use crate::util::{now_iso, system_time_iso};
 
@@ -348,8 +348,7 @@ pub(crate) fn scan_mods_for_settings(
     let mut tags = read_tags(&paths.tags_path)?;
     let alias_keys = alias_keys_by_filename(&tags);
     let mut changed = false;
-    let mut base_counts: HashMap<String, usize> = HashMap::new();
-    let mut jars: Vec<(String, PathBuf)> = Vec::new();
+    let mut jars_by_filename: HashMap<String, Vec<PathBuf>> = HashMap::new();
 
     for mods_dir in paths.all_mods_dirs() {
         let entries = fs::read_dir(mods_dir).map_err(|error| error.to_string())?;
@@ -361,19 +360,26 @@ pub(crate) fn scan_mods_for_settings(
             let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
-            let filename = filename.to_string();
-            *base_counts.entry(filename.clone()).or_default() += 1;
-            jars.push((filename, path));
+            jars_by_filename
+                .entry(filename.to_string())
+                .or_default()
+                .push(path);
         }
     }
 
-    jars.sort_by(|left, right| {
-        left.0.cmp(&right.0)
-            .then_with(|| left.1.cmp(&right.1))
-    });
+    let mut jars: Vec<(String, PathBuf, bool)> = Vec::with_capacity(jars_by_filename.len());
+    for (filename, candidates) in jars_by_filename {
+        let duplicate = candidates.len() > 1;
+        let Some(path) = select_canonical_mod_jar(&paths, &filename, &candidates) else {
+            continue;
+        };
+        jars.push((filename, path, duplicate));
+    }
+
+    jars.sort_by(|left, right| left.0.cmp(&right.0));
     let mut mods = Vec::with_capacity(jars.len());
 
-    for (filename, path) in jars {
+    for (filename, path, duplicate) in jars {
         let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
         let info = index.get(&filename);
         let key = key_for_file(&filename, info, &alias_keys);
@@ -484,7 +490,7 @@ pub(crate) fn scan_mods_for_settings(
             modrinth_version_id,
             curseforge_id,
             curseforge_file_id,
-            duplicate: base_counts.get(&filename).copied().unwrap_or_default() > 1,
+            duplicate,
             modified_at: metadata
                 .modified()
                 .map(system_time_iso)

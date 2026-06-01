@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
+    time::UNIX_EPOCH,
 };
 use tauri::{AppHandle, Manager};
 
@@ -72,14 +73,20 @@ impl InstancePaths {
             .chain(self.extra_mods_dirs.iter().map(|path| path.as_path()))
     }
 
-    pub(crate) fn resolve_mod_jar(&self, filename: &str) -> Option<PathBuf> {
+    pub(crate) fn mod_jar_candidates(&self, filename: &str) -> Vec<PathBuf> {
+        let mut candidates = Vec::new();
         for dir in self.all_mods_dirs() {
             let path = dir.join(filename);
             if path.is_file() {
-                return Some(path);
+                candidates.push(path);
             }
         }
-        None
+        candidates
+    }
+
+    pub(crate) fn resolve_mod_jar(&self, filename: &str) -> Option<PathBuf> {
+        let candidates = self.mod_jar_candidates(filename);
+        select_canonical_mod_jar(self, filename, &candidates)
     }
 
     pub(crate) fn mod_jar_dir(&self, filename: &str) -> PathBuf {
@@ -87,6 +94,62 @@ impl InstancePaths {
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .unwrap_or_else(|| self.mods_dir.clone())
     }
+}
+
+fn jar_modified_ms(path: &Path) -> Option<u128> {
+    fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_millis())
+}
+
+pub(crate) fn select_canonical_mod_jar(
+    paths: &InstancePaths,
+    filename: &str,
+    candidates: &[PathBuf],
+) -> Option<PathBuf> {
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let primary = paths.mods_dir.join(filename);
+    if primary.is_file() {
+        return Some(primary);
+    }
+
+    let mut automodpack: Vec<PathBuf> = candidates
+        .iter()
+        .filter(|path| path.is_file() && *path != &primary)
+        .cloned()
+        .collect();
+    automodpack.sort_by(|left, right| left.as_os_str().cmp(right.as_os_str()));
+
+    if automodpack.is_empty() {
+        return None;
+    }
+
+    let mut best_path = automodpack[0].clone();
+    let mut best_mtime = jar_modified_ms(&best_path);
+    for path in automodpack.iter().skip(1) {
+        let mtime = jar_modified_ms(path);
+        let replace = match (best_mtime, mtime) {
+            (None, None) => path.as_os_str() < best_path.as_os_str(),
+            (None, Some(_)) => true,
+            (Some(_), None) => false,
+            (Some(left), Some(right)) => {
+                right > left || (right == left && path.as_os_str() < best_path.as_os_str())
+            }
+        };
+        if replace {
+            best_path = path.clone();
+            best_mtime = mtime;
+        }
+    }
+
+    Some(best_path)
 }
 
 fn discover_automodpack_mods_dirs(minecraft_dir: &Path) -> Vec<PathBuf> {
@@ -102,7 +165,7 @@ fn discover_automodpack_mods_dirs(minecraft_dir: &Path) -> Vec<PathBuf> {
             dirs.push(mods);
         }
     }
-    dirs.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+    dirs.sort_by(|left, right| left.as_os_str().cmp(right.as_os_str()));
     dirs
 }
 

@@ -15,12 +15,12 @@ use crate::dependencies::{
 };
 use crate::instance_registry;
 use crate::mods::{merge_keys, normalize_side, scan_mods_for_settings, stats_for, ModListPayload};
+use crate::mods_watch;
+use crate::prefetch::{identify_unknown_sources, sync_mods_unified, SyncFlags};
 use crate::provider_labels::{
     fetch_and_store_provider_labels, manual_tags_for, provider_tags_for,
     refresh_provider_labels_bulk, refresh_result_for, RefreshProviderLabelsResult,
 };
-use crate::mods_watch;
-use crate::prefetch::{identify_unknown_sources, sync_mods_unified, SyncFlags};
 use crate::providers::{
     InstallProviderVersionRequest, InstallProviderVersionResult, ListProviderVersionsRequest,
     ProviderVersionsPayload, SearchProviderRequest, SwitchModSourceRequest, SwitchModSourceResult,
@@ -740,8 +740,7 @@ pub(crate) async fn sync_provider_data(
                 force_labels: request.labels,
                 only_missing_labels: false,
             };
-            let unified =
-                sync_mods_unified(&settings, &app_handle, flags, Some(task_token))?;
+            let unified = sync_mods_unified(&settings, &app_handle, flags, Some(task_token))?;
             labels_refreshed = unified.labels_refreshed;
             assets_refreshed = unified.covers_downloaded + unified.dependencies_updated;
             ensure_task_active(&app_handle, task_token)?;
@@ -812,7 +811,8 @@ pub(crate) fn get_data_usage(app: AppHandle) -> Result<DataUsageResult, String> 
 
     let mut covers_cache = dir_size_bytes(&data_root.join("covers").join("cache"));
     if let Ok(app_data) = app.path().app_data_dir() {
-        covers_cache = covers_cache.saturating_add(dir_size_bytes(&app_data.join("catalog").join("covers")));
+        covers_cache =
+            covers_cache.saturating_add(dir_size_bytes(&app_data.join("catalog").join("covers")));
     }
     let covers_manual = dir_size_bytes(&data_root.join("covers").join("manual"));
     let tags_file = std::fs::metadata(&paths.tags_path)

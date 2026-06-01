@@ -54,10 +54,7 @@ pub fn sync_mods_watch(app: &AppHandle, mods_dirs: Vec<PathBuf>) {
     };
     *guard = None;
 
-    let dirs: Vec<PathBuf> = mods_dirs
-        .into_iter()
-        .filter(|path| path.is_dir())
-        .collect();
+    let dirs: Vec<PathBuf> = mods_dirs.into_iter().filter(|path| path.is_dir()).collect();
     if dirs.is_empty() {
         return;
     }

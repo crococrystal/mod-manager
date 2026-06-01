@@ -759,7 +759,9 @@ pub(crate) fn modrinth_projects_batch(
                 result.insert(id.to_string(), project.clone());
             }
             if let Some(slug) = project.get("slug").and_then(|v| v.as_str()) {
-                result.entry(slug.to_string()).or_insert_with(|| project.clone());
+                result
+                    .entry(slug.to_string())
+                    .or_insert_with(|| project.clone());
             }
         }
     }
@@ -923,7 +925,10 @@ pub(crate) fn modrinth_dependencies_from_payload(
     modrinth_lookup: &HashMap<String, String>,
 ) -> Vec<String> {
     let mut deps = Vec::new();
-    let Some(items) = payload.get("dependencies").and_then(|value| value.as_array()) else {
+    let Some(items) = payload
+        .get("dependencies")
+        .and_then(|value| value.as_array())
+    else {
         return deps;
     };
     for dep in items {

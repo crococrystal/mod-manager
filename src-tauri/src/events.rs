@@ -172,4 +172,3 @@ pub(crate) fn emit_labels_ready(
         },
     );
 }
-

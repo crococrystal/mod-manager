@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::mods::{ModEntry, normalize_side};
+use crate::mods::{normalize_side, ModEntry};
 use crate::remote::{curseforge_get, http_client, modrinth_project, modrinth_version};
 use crate::settings::Settings;
 use crate::tags::{ModTags, ProviderLabelsStore};
@@ -185,10 +185,9 @@ fn fetch_modrinth_labels(
 ) -> Result<ProviderLabelsStore, String> {
     let payload = modrinth_project(client, project_id)
         .ok_or_else(|| "Modrinth не вернул данные проекта.".to_string())?;
-    let version_payload =
-        version_id
-            .filter(|value| !value.is_empty())
-            .and_then(|version_id| modrinth_version(client, version_id));
+    let version_payload = version_id
+        .filter(|value| !value.is_empty())
+        .and_then(|version_id| modrinth_version(client, version_id));
     Ok(build_modrinth_labels(&payload, version_payload.as_ref()))
 }
 
@@ -285,8 +284,7 @@ pub(crate) fn build_curseforge_labels(
                                 push_unique(&mut loaders, name);
                             }
                         }
-                        if let Some(version) = index.get("gameVersion").and_then(|v| v.as_str())
-                        {
+                        if let Some(version) = index.get("gameVersion").and_then(|v| v.as_str()) {
                             push_unique(&mut game_versions, version.to_string());
                         }
                     }
@@ -339,7 +337,9 @@ fn map_provider_side(store: &ProviderLabelsStore) -> Option<String> {
     let side = match (client, server) {
         ("required", "unsupported") => "client",
         ("unsupported", "required") => "server",
-        ("required", "required") | ("optional", "optional") | ("required", "optional")
+        ("required", "required")
+        | ("optional", "optional")
+        | ("required", "optional")
         | ("optional", "required") => "universal",
         _ => "universal",
     };
@@ -383,10 +383,7 @@ fn push_unique(target: &mut Vec<String>, value: String) {
 }
 
 fn category_slug(value: &str) -> String {
-    value
-        .trim()
-        .to_ascii_lowercase()
-        .replace(' ', "-")
+    value.trim().to_ascii_lowercase().replace(' ', "-")
 }
 
 fn curseforge_loader_name(value: i64) -> Option<String> {

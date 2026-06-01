@@ -50,7 +50,10 @@ pub fn run() {
                 if let Ok(paths) = settings::resolve_paths(&settings) {
                     mods_watch::sync_mods_watch(
                         &handle,
-                        paths.all_mods_dirs().map(std::path::PathBuf::from).collect(),
+                        paths
+                            .all_mods_dirs()
+                            .map(std::path::PathBuf::from)
+                            .collect(),
                     );
                 }
             }
