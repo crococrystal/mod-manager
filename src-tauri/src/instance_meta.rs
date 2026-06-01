@@ -27,7 +27,11 @@ pub(crate) fn detect_instance_target(paths: &InstancePaths) -> InstanceTarget {
         target.minecraft_version = detect_from_versions_dir(paths);
     }
     if target.minecraft_version.is_none() || target.loader.is_none() {
-        merge_target(&mut target, detect_from_mods_folder(&paths.mods_dir));
+        let mut from_mods = InstanceTarget::default();
+        for mods_dir in paths.all_mods_dirs() {
+            merge_target(&mut from_mods, detect_from_mods_folder(mods_dir));
+        }
+        merge_target(&mut target, from_mods);
     }
 
     target

@@ -48,7 +48,10 @@ pub(crate) fn identify_unknown_sources(
         if matches!(item.source.as_str(), "modrinth" | "curseforge") {
             continue;
         }
-        let identity = read_file_identity(&paths.mods_dir.join(&item.filename))?;
+        let jar_path = paths
+            .resolve_mod_jar(&item.filename)
+            .ok_or_else(|| format!("Файл мода не найден: {}", item.filename))?;
+        let identity = read_file_identity(&jar_path)?;
         pending.push(PendingIdentity {
             key: item.key.clone(),
             filename: item.filename.clone(),

@@ -175,7 +175,8 @@ fn lookup_fingerprint_blocking(
     filename: &str,
 ) -> Option<ProviderCandidate> {
     let client = search_http_client()?;
-    let identity = read_file_identity(&paths.mods_dir.join(filename)).ok()?;
+    let jar_path = paths.resolve_mod_jar(filename)?;
+    let identity = read_file_identity(&jar_path).ok()?;
     match source {
         "curseforge" => {
             if settings.curseforge_api_key.trim().is_empty() {
@@ -227,7 +228,7 @@ fn switch_source_quick(
     let settings = read_settings(app)?;
     let paths = resolve_paths(&settings)?;
     let filename = request.filename.trim().to_string();
-    if !filename.is_empty() && !paths.mods_dir.join(&filename).is_file() {
+    if !filename.is_empty() && paths.resolve_mod_jar(&filename).is_none() {
         return Err("Файл мода не найден в текущей сборке.".to_string());
     }
 
@@ -351,8 +352,8 @@ fn complete_switch_identity(
     let mut provider_title = followup.title.clone();
 
     if !followup.filename.is_empty() {
-        if let Ok(identity) = read_file_identity(&followup.paths.mods_dir.join(&followup.filename))
-        {
+        if let Some(jar_path) = followup.paths.resolve_mod_jar(&followup.filename) {
+            if let Ok(identity) = read_file_identity(&jar_path) {
             match followup.source.as_str() {
                 "modrinth" => {
                     if let Some(found) = modrinth_version_by_sha512(client, &identity.sha512) {
@@ -375,6 +376,7 @@ fn complete_switch_identity(
                     }
                 }
                 _ => {}
+            }
             }
         }
     }

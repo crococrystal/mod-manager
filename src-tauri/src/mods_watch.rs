@@ -47,16 +47,20 @@ fn should_suppress_event() -> bool {
     now_millis() <= SUPPRESS_UNTIL_MS.load(Ordering::Relaxed)
 }
 
-pub fn sync_mods_watch(app: &AppHandle, mods_dir: Option<PathBuf>) {
+pub fn sync_mods_watch(app: &AppHandle, mods_dirs: Vec<PathBuf>) {
     let mut guard = match WATCH.lock() {
         Ok(value) => value,
         Err(_) => return,
     };
     *guard = None;
 
-    let Some(dir) = mods_dir.filter(|path| path.is_dir()) else {
+    let dirs: Vec<PathBuf> = mods_dirs
+        .into_iter()
+        .filter(|path| path.is_dir())
+        .collect();
+    if dirs.is_empty() {
         return;
-    };
+    }
 
     let handle = app.clone();
     let Ok(mut debouncer) = new_debouncer(
@@ -75,7 +79,13 @@ pub fn sync_mods_watch(app: &AppHandle, mods_dir: Option<PathBuf>) {
         return;
     };
 
-    if debouncer.watch(&dir, RecursiveMode::Recursive).is_err() {
+    let mut watched = false;
+    for dir in dirs {
+        if debouncer.watch(&dir, RecursiveMode::Recursive).is_ok() {
+            watched = true;
+        }
+    }
+    if !watched {
         return;
     }
 

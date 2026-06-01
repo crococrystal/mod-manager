@@ -48,7 +48,10 @@ pub fn run() {
             let handle = app.handle().clone();
             if let Ok(settings) = settings::read_settings(&handle) {
                 if let Ok(paths) = settings::resolve_paths(&settings) {
-                    mods_watch::sync_mods_watch(&handle, Some(paths.mods_dir));
+                    mods_watch::sync_mods_watch(
+                        &handle,
+                        paths.all_mods_dirs().map(std::path::PathBuf::from).collect(),
+                    );
                 }
             }
             Ok(())

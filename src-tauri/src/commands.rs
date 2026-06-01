@@ -114,9 +114,9 @@ pub(crate) fn save_settings(
         cancel_active_bootstrap(&app);
     }
     if let Ok(paths) = resolve_paths(&settings) {
-        mods_watch::sync_mods_watch(&app, Some(paths.mods_dir));
+        mods_watch::sync_mods_watch(&app, paths.all_mods_dirs().map(PathBuf::from).collect());
     } else {
-        mods_watch::sync_mods_watch(&app, None);
+        mods_watch::sync_mods_watch(&app, Vec::new());
     }
     settings_view(&app, settings)
 }
@@ -284,7 +284,7 @@ pub(crate) async fn bootstrap_instance(
 ) -> Result<instance_registry::BootstrapResult, String> {
     let settings = read_settings(&app)?;
     let paths = resolve_paths(&settings)?;
-    let fingerprint = instance_registry::mods_fingerprint(&paths.mods_dir)?;
+    let fingerprint = instance_registry::mods_fingerprint_dirs(paths.all_mods_dirs())?;
     let force = force.unwrap_or(false);
     let app_handle = app.clone();
     let bootstrap_token = {
@@ -569,7 +569,10 @@ pub(crate) async fn copy_mod_files(app: AppHandle, keys: Vec<String>) -> Result<
             let Some(item) = mods.iter().find(|mod_entry| mod_entry.key == key) else {
                 continue;
             };
-            let path = absolute_path(paths.mods_dir.join(&item.filename));
+            let path = paths
+                .resolve_mod_jar(&item.filename)
+                .map(|jar_path| absolute_path(jar_path))
+                .unwrap_or_default();
             if path.is_file() {
                 file_paths.push(path);
             }

@@ -100,22 +100,26 @@ pub fn display_name_for(instance_root: &Path) -> String {
         .to_string()
 }
 
-pub fn mods_fingerprint(mods_dir: &Path) -> Result<String, String> {
+pub fn mods_fingerprint_dirs(dirs: impl IntoIterator<Item = impl AsRef<Path>>) -> Result<String, String> {
     let mut parts = Vec::new();
-    let entries = fs::read_dir(mods_dir).map_err(|e| e.to_string())?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("jar") {
-            continue;
+    for mods_dir in dirs {
+        let mods_dir = mods_dir.as_ref();
+        let prefix = mods_dir.to_string_lossy();
+        let entries = fs::read_dir(mods_dir).map_err(|e| e.to_string())?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("jar") {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            let mtime_ms = fs::metadata(&path)
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+                .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis())
+                .unwrap_or(0);
+            parts.push(format!("{prefix}/{name}:{mtime_ms}"));
         }
-        let name = entry.file_name().to_string_lossy().to_string();
-        let mtime_ms = fs::metadata(&path)
-            .ok()
-            .and_then(|meta| meta.modified().ok())
-            .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|duration| duration.as_millis())
-            .unwrap_or(0);
-        parts.push(format!("{name}:{mtime_ms}"));
     }
     parts.sort();
     let digest = Sha256::digest(parts.join("\n").as_bytes());

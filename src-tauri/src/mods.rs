@@ -349,27 +349,31 @@ pub(crate) fn scan_mods_for_settings(
     let alias_keys = alias_keys_by_filename(&tags);
     let mut changed = false;
     let mut base_counts: HashMap<String, usize> = HashMap::new();
-    let mut jars = Vec::new();
+    let mut jars: Vec<(String, PathBuf)> = Vec::new();
 
-    let entries = fs::read_dir(&paths.mods_dir).map_err(|error| error.to_string())?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("jar") {
-            continue;
+    for mods_dir in paths.all_mods_dirs() {
+        let entries = fs::read_dir(mods_dir).map_err(|error| error.to_string())?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("jar") {
+                continue;
+            }
+            let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let filename = filename.to_string();
+            *base_counts.entry(filename.clone()).or_default() += 1;
+            jars.push((filename, path));
         }
-        let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        let filename = filename.to_string();
-        *base_counts.entry(filename.clone()).or_default() += 1;
-        jars.push(filename);
     }
 
-    jars.sort();
+    jars.sort_by(|left, right| {
+        left.0.cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+    });
     let mut mods = Vec::with_capacity(jars.len());
 
-    for filename in jars {
-        let path = paths.mods_dir.join(&filename);
+    for (filename, path) in jars {
         let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
         let info = index.get(&filename);
         let key = key_for_file(&filename, info, &alias_keys);

@@ -60,9 +60,50 @@ pub(crate) struct SettingsView {
 pub(crate) struct InstancePaths {
     pub instance_root: PathBuf,
     pub mods_dir: PathBuf,
+    pub extra_mods_dirs: Vec<PathBuf>,
     pub index_dir: PathBuf,
     pub data_root: PathBuf,
     pub tags_path: PathBuf,
+}
+
+impl InstancePaths {
+    pub(crate) fn all_mods_dirs(&self) -> impl Iterator<Item = &Path> {
+        std::iter::once(self.mods_dir.as_path())
+            .chain(self.extra_mods_dirs.iter().map(|path| path.as_path()))
+    }
+
+    pub(crate) fn resolve_mod_jar(&self, filename: &str) -> Option<PathBuf> {
+        for dir in self.all_mods_dirs() {
+            let path = dir.join(filename);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn mod_jar_dir(&self, filename: &str) -> PathBuf {
+        self.resolve_mod_jar(filename)
+            .and_then(|path| path.parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| self.mods_dir.clone())
+    }
+}
+
+fn discover_automodpack_mods_dirs(minecraft_dir: &Path) -> Vec<PathBuf> {
+    let modpacks = minecraft_dir.join("automodpack").join("modpacks");
+    let Ok(entries) = fs::read_dir(&modpacks) else {
+        return Vec::new();
+    };
+
+    let mut dirs = Vec::new();
+    for entry in entries.flatten() {
+        let mods = entry.path().join("mods");
+        if mods.is_dir() {
+            dirs.push(mods);
+        }
+    }
+    dirs.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+    dirs
 }
 
 pub(crate) fn app_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -128,12 +169,19 @@ pub(crate) fn resolve_paths(settings: &Settings) -> Result<InstancePaths, String
         return Err("В выбранной папке не нашлась minecraft/mods.".to_string());
     };
 
+    let minecraft_dir = mods_dir
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| instance_root.clone());
+    let extra_mods_dirs = discover_automodpack_mods_dirs(&minecraft_dir);
+
     Ok(InstancePaths {
         instance_root: instance_root.clone(),
         index_dir: mods_dir.join(".index"),
         data_root: instance_root.join(".mod-manager"),
         tags_path: instance_root.join(".mod-manager").join("mod-tags.json"),
         mods_dir,
+        extra_mods_dirs,
     })
 }
 
@@ -141,7 +189,7 @@ pub(crate) fn settings_view(app: &AppHandle, settings: Settings) -> Result<Setti
     let paths = resolve_paths(&settings).ok();
     let fingerprint = paths
         .as_ref()
-        .map(|value| instance_registry::mods_fingerprint(&value.mods_dir))
+        .map(|value| instance_registry::mods_fingerprint_dirs(value.all_mods_dirs()))
         .transpose()?
         .unwrap_or_default();
     let registry = instance_registry::read_registry(app)?;

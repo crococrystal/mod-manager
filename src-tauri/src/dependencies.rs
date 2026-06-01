@@ -18,7 +18,11 @@ pub(crate) fn apply_jar_dependencies(
         })
         .collect();
     let cache_path = paths.data_root.join("cache").join("jar-dependencies.json");
-    let map = jar_deps::jar_info_for_mods(&paths.mods_dir, &cache_path, &refs)?;
+    let map = jar_deps::jar_info_for_mods(
+        |filename| paths.resolve_mod_jar(filename).unwrap_or_else(|| paths.mods_dir.join(filename)),
+        &cache_path,
+        &refs,
+    )?;
     for item in mods.iter_mut() {
         if let Some(info) = map.get(&item.key) {
             if !item.display_name_locked {

@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::Path, process::Command, time::SystemTime};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    time::SystemTime,
+};
 
 const SKIP_MOD_IDS: &[&str] = &[
     "minecraft",
@@ -276,7 +282,7 @@ fn save_cache(path: &Path, cache: &JarCacheFile) -> Result<(), String> {
 }
 
 pub fn jar_info_for_mods(
-    mods_dir: &Path,
+    jar_path_for: impl Fn(&str) -> PathBuf,
     cache_path: &Path,
     refs: &[ModRef],
 ) -> Result<HashMap<String, JarInfo>, String> {
@@ -286,7 +292,7 @@ pub fn jar_info_for_mods(
     let mut mod_ids_by_key = HashMap::new();
 
     for item in refs {
-        let jar_path = mods_dir.join(&item.filename);
+        let jar_path = jar_path_for(&item.filename);
         let mtime_ms = fs::metadata(&jar_path)
             .ok()
             .and_then(|m| m.modified().ok())

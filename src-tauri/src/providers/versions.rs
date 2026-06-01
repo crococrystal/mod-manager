@@ -130,7 +130,7 @@ fn list_versions_blocking(
     let settings = read_settings(app)?;
     let paths = resolve_paths(&settings)?;
     if let Some(filename) = clean_string(&request.filename) {
-        if !paths.mods_dir.join(filename).is_file() {
+        if paths.resolve_mod_jar(&filename).is_none() {
             return Err("Файл мода не найден в текущей сборке.".to_string());
         }
     }
@@ -412,10 +412,10 @@ fn install_project(
     let paths = resolve_paths(&settings)?;
     let old_filename =
         clean_string(&request.filename).ok_or_else(|| "Не задан текущий файл мода.".to_string())?;
-    let old_path = paths.mods_dir.join(&old_filename);
-    if !old_path.is_file() {
-        return Err("Текущий файл мода не найден в папке mods.".to_string());
-    }
+    let old_path = paths
+        .resolve_mod_jar(&old_filename)
+        .ok_or_else(|| "Текущий файл мода не найден в папке mods.".to_string())?;
+    let install_dir = paths.mod_jar_dir(&old_filename);
 
     let client = http_client().ok_or_else(|| "Не удалось создать HTTP-клиент.".to_string())?;
     let download_url = resolve_download_url(&client, &settings, &request, &source)?;
@@ -425,14 +425,12 @@ fn install_project(
         .and_then(clean_string)
         .unwrap_or_else(|| old_filename.clone());
     let next_filename = sanitize_download_filename(&next_filename)?;
-    let next_path = paths.mods_dir.join(&next_filename);
+    let next_path = install_dir.join(&next_filename);
     if next_path != old_path && next_path.exists() {
         return Err("Файл выбранной версии уже есть в папке mods.".to_string());
     }
 
-    let temp_path = paths
-        .mods_dir
-        .join(format!(".mod-manager-download-{}.jar", timestamp_millis()));
+    let temp_path = install_dir.join(format!(".mod-manager-download-{}.jar", timestamp_millis()));
     mods_watch::suppress_events_for(Duration::from_secs(60));
     download_file(&client, &download_url, &temp_path)?;
     replace_installed_file(&old_path, &next_path, &temp_path)?;
