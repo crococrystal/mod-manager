@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Box } from 'lucide-react';
 
 export function ModCover({ mod, size = 'table', onClick, title }) {
-  const src = mod.coverUrl;
+  const src = mod?.coverUrl;
   const clickable = Boolean(onClick);
   const isLarge = size === 'hero' || size === 'editor';
   const className =

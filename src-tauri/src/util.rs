@@ -14,6 +14,13 @@ pub(crate) fn path_string(path: std::path::PathBuf) -> String {
     path.to_string_lossy().to_string()
 }
 
+pub(crate) fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or_default()
+}
+
 pub(crate) fn file_mtime_millis(path: &std::path::Path) -> Option<u64> {
     let metadata = std::fs::metadata(path).ok()?;
     let modified = metadata.modified().ok()?;

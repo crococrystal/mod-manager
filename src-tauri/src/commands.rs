@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::HashSet, fs, path::PathBuf, time::Duration};
 
 use base64::{engine::general_purpose, Engine};
 use serde::{Deserialize, Serialize};
@@ -7,8 +7,8 @@ use tauri::{AppHandle, Manager};
 use crate::bootstrap::{bootstrap_still_active, cancel_active_bootstrap, ensure_task_active};
 use crate::catalog;
 use crate::covers::{
-    cover_ext_from_mime, delete_manual_cover, fetch_mod_cover, resolve_cover_state,
-    store_uploaded_cover,
+    cover_dir, cover_ext_from_mime, delete_manual_cover, fetch_mod_cover, remove_cover_variants,
+    resolve_cover_state, store_uploaded_cover,
 };
 use crate::dependencies::{
     filter_reverse_jar_dependency_keys, jar_dependencies_by_key, same_dependency_list,
@@ -22,10 +22,14 @@ use crate::provider_labels::{
     refresh_provider_labels_bulk, refresh_result_for, RefreshProviderLabelsResult,
 };
 use crate::providers::{
-    InstallProviderVersionRequest, InstallProviderVersionResult, ListProviderVersionsRequest,
-    ProviderVersionsPayload, SearchProviderRequest, SwitchModSourceRequest, SwitchModSourceResult,
+    CatalogInstallPreview, CatalogInstallPreviewRequest, CatalogInstallRequest,
+    CatalogInstallResult, CatalogProjectDetails, CatalogProjectDetailsRequest,
+    CatalogSearchRequest, CatalogSearchResponse, InstallProviderVersionRequest,
+    InstallProviderVersionResult, ListProviderVersionsRequest, ProviderVersionsPayload,
+    SearchProviderRequest, SwitchModSourceRequest, SwitchModSourceResult,
 };
-use crate::remote::{fetch_api_dependencies, http_client, ProviderCandidate};
+use crate::remote::ProviderCandidate;
+use crate::remote::{fetch_api_dependencies, http_client};
 use crate::settings::{
     read_settings, remember_instance, resolve_paths, settings_view, write_settings, Settings,
     SettingsView,
@@ -67,6 +71,13 @@ pub(crate) struct RefreshModAssetsResult {
     pub cover_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover_modified_at: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeleteModFilesResult {
+    pub removed: u32,
+    pub filenames: Vec<String>,
 }
 
 fn absolute_path(path: PathBuf) -> PathBuf {
@@ -552,6 +563,38 @@ pub(crate) async fn install_provider_version(
 }
 
 #[tauri::command]
+pub(crate) async fn search_provider_catalog(
+    app: AppHandle,
+    request: CatalogSearchRequest,
+) -> Result<CatalogSearchResponse, String> {
+    crate::providers::search_catalog(app, request).await
+}
+
+#[tauri::command]
+pub(crate) async fn preview_catalog_install(
+    app: AppHandle,
+    request: CatalogInstallPreviewRequest,
+) -> Result<CatalogInstallPreview, String> {
+    crate::providers::preview_catalog_install(app, request).await
+}
+
+#[tauri::command]
+pub(crate) async fn catalog_project_details(
+    app: AppHandle,
+    request: CatalogProjectDetailsRequest,
+) -> Result<CatalogProjectDetails, String> {
+    crate::providers::catalog_project_details(app, request).await
+}
+
+#[tauri::command]
+pub(crate) async fn install_from_catalog(
+    app: AppHandle,
+    request: CatalogInstallRequest,
+) -> Result<CatalogInstallResult, String> {
+    crate::providers::install_from_catalog(app, request).await
+}
+
+#[tauri::command]
 pub(crate) async fn copy_mod_files(app: AppHandle, keys: Vec<String>) -> Result<u32, String> {
     let app_handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<u32, String> {
@@ -587,6 +630,92 @@ pub(crate) async fn copy_mod_files(app: AppHandle, keys: Vec<String>) -> Result<
     })
     .await
     .map_err(|error| format!("Копирование прервано: {error}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn delete_mod_files(
+    app: AppHandle,
+    keys: Vec<String>,
+) -> Result<DeleteModFilesResult, String> {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<DeleteModFilesResult, String> {
+        let key_set: HashSet<String> = keys.into_iter().filter(|key| !key.is_empty()).collect();
+        if key_set.is_empty() {
+            return Err("Нечего удалять.".to_string());
+        }
+
+        let settings = read_settings(&app_handle)?;
+        let paths = resolve_paths(&settings)?;
+        let catalog_root = catalog::catalog_root(&app_handle).ok();
+        let mods = scan_mods_for_settings(&settings, catalog_root)?;
+        let mut tags = read_tags(&paths.tags_path)?;
+        let cache_cover_dir = cover_dir(&paths.data_root, false);
+        let manual_cover_dir = cover_dir(&paths.data_root, true);
+        let mut filenames = Vec::new();
+
+        mods_watch::suppress_events_for(Duration::from_secs(4));
+
+        for key in &key_set {
+            let Some(item) = mods.iter().find(|entry| entry.key.as_str() == key.as_str()) else {
+                continue;
+            };
+            let blockers: Vec<String> = item
+                .used_by
+                .iter()
+                .filter(|used_by| !key_set.contains(*used_by))
+                .map(|used_by| {
+                    mods.iter()
+                        .find(|entry| entry.key == *used_by)
+                        .map(|entry| entry.display_name.clone())
+                        .unwrap_or_else(|| used_by.clone())
+                })
+                .collect();
+            if !blockers.is_empty() {
+                return Err(format!(
+                    "Нельзя удалить {}: используется для {}.",
+                    item.display_name,
+                    blockers.join(", ")
+                ));
+            }
+        }
+
+        for key in &key_set {
+            let Some(item) = mods.iter().find(|entry| entry.key.as_str() == key.as_str()) else {
+                continue;
+            };
+            let Some(path) = paths.resolve_mod_jar(&item.filename) else {
+                continue;
+            };
+            fs::remove_file(&path)
+                .map_err(|error| format!("Не удалось удалить {}: {error}", item.filename))?;
+            if let Some(index_file) = &item.index_file {
+                let index_path = paths.index_dir.join(index_file);
+                if index_path.is_file() {
+                    fs::remove_file(&index_path).map_err(|error| {
+                        format!("Не удалось удалить индекс {}: {error}", index_file)
+                    })?;
+                }
+            }
+            filenames.push(item.filename.clone());
+            tags.mods.remove(&item.key);
+            remove_cover_variants(&cache_cover_dir, &item.key);
+            remove_cover_variants(&manual_cover_dir, &item.key);
+        }
+
+        if filenames.is_empty() {
+            return Err("Не найдено файлов для удаления.".to_string());
+        }
+
+        tags.updated_at = now_iso();
+        write_tags(&paths.tags_path, &tags)?;
+
+        Ok(DeleteModFilesResult {
+            removed: filenames.len() as u32,
+            filenames,
+        })
+    })
+    .await
+    .map_err(|error| format!("Удаление модов прервано: {error}"))?
 }
 
 #[derive(Clone, Debug, Serialize)]

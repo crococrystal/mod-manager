@@ -46,6 +46,35 @@ export function searchProviderCandidates({ source, displayName, filename }) {
   });
 }
 
+export function searchProviderCatalog({ source, query }) {
+  return invoke('search_provider_catalog', {
+    request: { source, query }
+  });
+}
+
+export function previewCatalogInstall({ source, projectId, versionId, forceRefresh = false }) {
+  return invoke('preview_catalog_install', {
+    request: {
+      source,
+      projectId,
+      versionId: versionId ?? null,
+      forceRefresh
+    }
+  });
+}
+
+export function catalogProjectDetails({ source, projectId, forceRefresh = false }) {
+  return invoke('catalog_project_details', {
+    request: { source, projectId, forceRefresh }
+  });
+}
+
+export function installFromCatalog({ source, projectId, versionId }) {
+  return invoke('install_from_catalog', {
+    request: { source, projectId, versionId: versionId ?? null }
+  });
+}
+
 export function lookupProviderFingerprint({ source, displayName, filename }) {
   return invoke('lookup_provider_fingerprint', {
     request: { source, displayName, filename }
@@ -106,6 +135,10 @@ export function installProviderVersion({
 
 export function copyModFiles(keys) {
   return invoke('copy_mod_files', { keys });
+}
+
+export function deleteModFiles(keys) {
+  return invoke('delete_mod_files', { keys });
 }
 
 export function uploadCover({ key, dataUrl }) {

@@ -94,6 +94,13 @@ impl InstancePaths {
             .and_then(|path| path.parent().map(Path::to_path_buf))
             .unwrap_or_else(|| self.mods_dir.clone())
     }
+
+    pub(crate) fn install_mods_dir(&self) -> PathBuf {
+        self.extra_mods_dirs
+            .first()
+            .cloned()
+            .unwrap_or_else(|| self.mods_dir.clone())
+    }
 }
 
 fn jar_modified_ms(path: &Path) -> Option<u128> {
@@ -152,6 +159,20 @@ pub(crate) fn select_canonical_mod_jar(
     Some(best_path)
 }
 
+fn selected_automodpack_modpack(minecraft_dir: &Path) -> Option<String> {
+    let config = minecraft_dir
+        .join("automodpack")
+        .join("automodpack-client.json");
+    let text = fs::read_to_string(config).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value
+        .get("selectedModpack")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 fn discover_automodpack_mods_dirs(minecraft_dir: &Path) -> Vec<PathBuf> {
     let modpacks = minecraft_dir.join("automodpack").join("modpacks");
     let Ok(entries) = fs::read_dir(&modpacks) else {
@@ -166,6 +187,13 @@ fn discover_automodpack_mods_dirs(minecraft_dir: &Path) -> Vec<PathBuf> {
         }
     }
     dirs.sort_by(|left, right| left.as_os_str().cmp(right.as_os_str()));
+    if let Some(selected) = selected_automodpack_modpack(minecraft_dir) {
+        let selected_mods = modpacks.join(selected).join("mods");
+        if let Some(index) = dirs.iter().position(|path| path == &selected_mods) {
+            let selected_dir = dirs.remove(index);
+            dirs.insert(0, selected_dir);
+        }
+    }
     dirs
 }
 
@@ -215,6 +243,35 @@ pub(crate) fn resolve_paths(settings: &Settings) -> Result<InstancePaths, String
 
     let (instance_root, mods_dir) = if selected.join("minecraft").join("mods").is_dir() {
         (selected.clone(), selected.join("minecraft").join("mods"))
+    } else if selected
+        .join("automodpack")
+        .join("host-modpack")
+        .join("main")
+        .join("mods")
+        .is_dir()
+    {
+        (
+            selected.clone(),
+            selected
+                .join("automodpack")
+                .join("host-modpack")
+                .join("main")
+                .join("mods"),
+        )
+    } else if selected
+        .join("host-modpack")
+        .join("main")
+        .join("mods")
+        .is_dir()
+    {
+        (
+            selected.clone(),
+            selected.join("host-modpack").join("main").join("mods"),
+        )
+    } else if selected.join("main").join("mods").is_dir()
+        && selected.file_name().and_then(|name| name.to_str()) == Some("host-modpack")
+    {
+        (selected.clone(), selected.join("main").join("mods"))
     } else if selected.join("mods").is_dir() {
         let instance = selected
             .parent()

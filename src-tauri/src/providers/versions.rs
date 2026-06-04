@@ -46,7 +46,7 @@ pub(crate) struct InstallProviderVersionRequest {
     pub version_number: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderVersion {
     pub id: String,
@@ -174,7 +174,7 @@ fn project_id_from_tags(paths: &InstancePaths, key: &str, source: &str) -> Optio
     }
 }
 
-fn list_modrinth_versions(
+pub(crate) fn list_modrinth_versions(
     client: &reqwest::blocking::Client,
     project_id: &str,
     target: &InstanceTarget,
@@ -211,7 +211,7 @@ fn list_modrinth_versions(
         .collect())
 }
 
-fn modrinth_version_from_json(item: &serde_json::Value) -> Option<ProviderVersion> {
+pub(crate) fn modrinth_version_from_json(item: &serde_json::Value) -> Option<ProviderVersion> {
     let id = item.get("id").and_then(|value| value.as_str())?.to_string();
     let version_number = item
         .get("version_number")
@@ -263,7 +263,7 @@ fn modrinth_version_from_json(item: &serde_json::Value) -> Option<ProviderVersio
     })
 }
 
-fn list_curseforge_versions(
+pub(crate) fn list_curseforge_versions(
     client: &reqwest::blocking::Client,
     settings: &Settings,
     project_id: &str,
@@ -297,7 +297,7 @@ fn list_curseforge_versions(
         .collect())
 }
 
-fn curseforge_version_from_json(item: &serde_json::Value) -> Option<ProviderVersion> {
+pub(crate) fn curseforge_version_from_json(item: &serde_json::Value) -> Option<ProviderVersion> {
     let file_id = item.get("id").and_then(|value| value.as_i64())?.to_string();
     let display_name = item
         .get("displayName")
@@ -507,7 +507,7 @@ fn resolve_download_url(
         .ok_or_else(|| "У этой версии CurseForge нет доступной ссылки на скачивание.".to_string())
 }
 
-fn download_file(
+pub(crate) fn download_file(
     client: &reqwest::blocking::Client,
     url: &str,
     destination: &Path,

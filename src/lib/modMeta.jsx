@@ -50,3 +50,15 @@ export function modModalSubtitle(mod, { section, parts = [] } = {}) {
 export function modByKey(mods) {
   return new Map(mods.map((mod) => [mod.key, mod]));
 }
+
+export function catalogProviderPageUrl(source, projectId, slug) {
+  const id = String(projectId ?? '').trim();
+  const slugValue = String(slug ?? '').trim();
+  if (!id) return null;
+  if (source === 'modrinth') return `https://modrinth.com/mod/${id}`;
+  if (source === 'curseforge') {
+    if (slugValue) return `https://www.curseforge.com/minecraft/mc-mods/${slugValue}`;
+    return `https://www.curseforge.com/minecraft/mc-mods/${id}`;
+  }
+  return null;
+}

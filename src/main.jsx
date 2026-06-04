@@ -2,6 +2,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { WindowFrame } from "./components/WindowFrame.jsx";
+import { setupExternalLinks } from "./lib/setupExternalLinks.js";
+
+setupExternalLinks();
 
 // Класс на <html> позволяет CSS подстроиться под конкретную ОС:
 // на Windows DWM рисует своё системное скругление и тень, поэтому

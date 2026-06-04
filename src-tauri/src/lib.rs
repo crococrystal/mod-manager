@@ -1,9 +1,11 @@
 mod bootstrap;
 mod catalog;
+mod catalog_cache;
 mod commands;
 mod covers;
 mod dependencies;
 mod events;
+mod external_links;
 mod file_identity;
 mod instance_meta;
 mod instance_registry;
@@ -24,6 +26,7 @@ mod window_chrome;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(external_links::plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -77,7 +80,12 @@ pub fn run() {
             commands::switch_mod_source,
             commands::list_provider_versions,
             commands::install_provider_version,
+            commands::search_provider_catalog,
+            commands::preview_catalog_install,
+            commands::catalog_project_details,
+            commands::install_from_catalog,
             commands::copy_mod_files,
+            commands::delete_mod_files,
             commands::upload_cover,
             commands::delete_custom_cover,
             commands::refresh_window_shadow

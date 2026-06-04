@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Search, Settings, SlidersHorizontal, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import {
   bootstrapInstance,
   cancelBackgroundTask,
   copyModFiles,
+  deleteModFiles,
   deleteCustomCover,
   getSettings,
   identifyModSources,
@@ -17,10 +18,16 @@ import {
   updateModTags,
   uploadCover
 } from './api.js';
+import { CatalogInstallDialog } from './features/catalog/CatalogInstallDialog.jsx';
+import { CatalogSearchPanel } from './features/catalog/CatalogSearchPanel.jsx';
+import { useCatalogSearch } from './features/catalog/useCatalogSearch.js';
+import { AppToolbar } from './components/AppToolbar.jsx';
+import { StatsBar } from './components/StatsBar.jsx';
 import { TitleBar } from './components/TitleBar.jsx';
 import { NoticeModal } from './components/NoticeModal.jsx';
 import { UpdateModal } from './components/UpdateModal.jsx';
 import { DescriptionDialog } from './features/mods/DescriptionDialog.jsx';
+import { ModContextMenu } from './features/mods/ModContextMenu.jsx';
 import { ModEditor } from './features/mods/ModEditor.jsx';
 import { ModTable } from './features/mods/ModTable.jsx';
 import { ProviderDialog } from './features/mods/ProviderDialog.jsx';
@@ -30,13 +37,14 @@ import { SettingsDialog } from './features/settings/SettingsDialog.jsx';
 import { useAppUpdater } from './hooks/useAppUpdater.js';
 import { canCheckForUpdates } from './lib/updater.js';
 import { modMatchesWorkspaceFilters } from './lib/modFilters.js';
-import { filters } from './lib/modMeta.jsx';
-import headerAppLogo from './assets/header-app-logo.svg';
+import { openExternalUrl } from './lib/openExternalUrl.js';
 import { normalizeModsGraph } from './lib/usedBy.js';
 import './styles/index.css';
+import './styles/catalog.css';
 
 const EMPTY_MODS = [];
 const EMPTY_STATS = {};
+const EMPTY_SET = new Set();
 
 function needsBootstrap(cacheStatus, { force = false } = {}) {
   if (force) return true;
@@ -223,15 +231,6 @@ function sortMods(mods, sort) {
     .map((item) => item.mod);
 }
 
-function Stat({ label, value = 0, tone }) {
-  return (
-    <div className={`stat ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
 function App() {
   const [payload, setPayload] = useState(null);
   const [settings, setSettings] = useState(null);
@@ -256,6 +255,9 @@ function App() {
   const [descriptionSavingKey, setDescriptionSavingKey] = useState(null);
   const [refreshingAssetsKey, setRefreshingAssetsKey] = useState(null);
   const [coverSavingKey, setCoverSavingKey] = useState(null);
+  const [deleteConfirmMods, setDeleteConfirmMods] = useState([]);
+  const [deletingModKeys, setDeletingModKeys] = useState(() => new Set());
+  const [modContextMenu, setModContextMenu] = useState(null);
   const [labelsRefreshingKey, setLabelsRefreshingKey] = useState(null);
   const [sort, setSort] = useState({ key: 'name', direction: 'asc' });
   const watcherReloadingRef = useRef(false);
@@ -281,6 +283,54 @@ function App() {
   }, [mods, query, filter, sort]);
 
   const canShowWorkspace = Boolean(settings?.instanceRoot);
+  const {
+    source: catalogSource,
+    mode: catalogMode,
+    results: catalogResults,
+    target: catalogTarget,
+    loading: catalogLoading,
+    error: catalogError,
+    installSelection: catalogInstallSelection,
+    toggleSource: toggleSearchSource,
+    clearQuery: clearCatalogQuery,
+    reset: resetCatalogSearch,
+    selectCandidate: selectCatalogCandidate,
+    closeInstall: closeCatalogInstall
+  } = useCatalogSearch({
+    query,
+    setQuery,
+    canSearch: canShowWorkspace,
+    curseforgeApiKeySet: settings?.curseforgeApiKeySet,
+    cacheScope: settings?.instanceRoot
+  });
+
+  const catalogInstalledProjectIdsBySource = useMemo(() => {
+    const bySource = {
+      modrinth: new Set(),
+      curseforge: new Set()
+    };
+    mods.forEach((mod) => {
+      if (mod.modrinthId) bySource.modrinth.add(String(mod.modrinthId));
+      if (mod.curseforgeId) bySource.curseforge.add(String(mod.curseforgeId));
+    });
+    return bySource;
+  }, [mods]);
+
+  const catalogInstalledProjectIds =
+    catalogInstalledProjectIdsBySource[catalogSource] ?? catalogInstalledProjectIdsBySource.modrinth;
+
+  const catalogInstallInstalledProjectIds =
+    catalogInstalledProjectIdsBySource[catalogInstallSelection?.source] ?? EMPTY_SET;
+
+  const catalogInstallInstalledStateKey = useMemo(
+    () => [...catalogInstallInstalledProjectIds].sort((a, b) => a.localeCompare(b)).join('|'),
+    [catalogInstallInstalledProjectIds]
+  );
+
+  const catalogInstallAlreadyInstalled = Boolean(
+    catalogInstallSelection?.candidate?.id &&
+      catalogInstallInstalledProjectIds.has(String(catalogInstallSelection.candidate.id))
+  );
 
   const applyPayload = useCallback((next) => {
     const normalized = withLocalCovers(next);
@@ -468,6 +518,112 @@ function App() {
     }
   }, []);
 
+  const deleteConfirmFreshMods = useMemo(() => {
+    const byKey = new Map(mods.map((item) => [item.key, item]));
+    return deleteConfirmMods
+      .map((item) => byKey.get(item.key) ?? item)
+      .filter((item) => item?.key);
+  }, [mods, deleteConfirmMods]);
+
+  const requestDeleteMods = useCallback(
+    (items) => {
+      const byKey = new Map(mods.map((item) => [item.key, item]));
+      const freshMods = [...new Map(
+        items
+          .map((item) => byKey.get(item.key) ?? item)
+          .filter((item) => item?.key)
+          .map((item) => [item.key, item])
+      ).values()];
+      if (!freshMods.length) return;
+
+      const deletingKeys = new Set(freshMods.map((item) => item.key));
+      const blockers = freshMods.flatMap((item) =>
+        (item.usedBy ?? [])
+          .filter((key) => !deletingKeys.has(key))
+          .map((key) => byKey.get(key)?.displayName ?? key)
+      );
+      if (blockers.length) {
+        const target = freshMods.length === 1 ? freshMods[0].displayName : `${freshMods.length} модов`;
+        setError(`Нельзя удалить ${target}: используется для ${[...new Set(blockers)].join(', ')}.`);
+        setModContextMenu(null);
+        return;
+      }
+
+      setDeleteConfirmMods(freshMods);
+      setModContextMenu(null);
+    },
+    [mods]
+  );
+
+  const confirmDeleteMods = useCallback(async () => {
+    const keys = deleteConfirmFreshMods.map((item) => item.key);
+    if (!keys.length) return;
+
+    setDeletingModKeys(new Set(keys));
+    setError('');
+    try {
+      await deleteModFiles(keys);
+      const next = await scanMods();
+      applyPayload(next);
+      setInfo(
+        keys.length === 1
+          ? `Мод удалён: ${deleteConfirmFreshMods[0].displayName}.`
+          : `Удалено модов: ${keys.length}.`
+      );
+      setDeleteConfirmMods([]);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setDeletingModKeys(new Set());
+    }
+  }, [applyPayload, deleteConfirmFreshMods]);
+
+  const contextMenuMods = useMemo(() => {
+    if (!modContextMenu?.keys?.length) return [];
+    const byKey = new Map(mods.map((item) => [item.key, item]));
+    return modContextMenu.keys.map((key) => byKey.get(key)).filter(Boolean);
+  }, [mods, modContextMenu]);
+  const contextMenuLabel = contextMenuMods.length === 1 ? contextMenuMods[0].displayName : '';
+  const contextMenuPageUrl = contextMenuMods.length === 1 ? contextMenuMods[0].sourceUrl : null;
+
+  const closeModContextMenu = useCallback(() => {
+    setModContextMenu(null);
+  }, []);
+
+  const handleModContextMenu = useCallback(
+    (mod, event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!mod) return;
+
+      const fresh = mods.find((item) => item.key === mod.key) ?? mod;
+      const keepSelection = selectedKeys.has(fresh.key) && selectedKeys.size > 1;
+      const keys = keepSelection ? [...selectedKeys] : [fresh.key];
+      if (!keepSelection) {
+        setSelected(fresh);
+        selectionAnchorRef.current = fresh.key;
+        setSelectedKeys(new Set([fresh.key]));
+      }
+      setModContextMenu({ x: event.clientX, y: event.clientY, keys });
+    },
+    [mods, selectedKeys]
+  );
+
+  const handleContextCopyMods = useCallback(() => {
+    const keys = contextMenuMods.map((item) => item.key);
+    if (keys.length) void copyModKeys(keys);
+    setModContextMenu(null);
+  }, [contextMenuMods, copyModKeys]);
+
+  const handleContextOpenPage = useCallback(() => {
+    if (contextMenuPageUrl) void openExternalUrl(contextMenuPageUrl);
+    setModContextMenu(null);
+  }, [contextMenuPageUrl]);
+
+  const handleContextDeleteMods = useCallback(() => {
+    requestDeleteMods(contextMenuMods);
+  }, [contextMenuMods, requestDeleteMods]);
+
   useEffect(() => {
     function handleKeyDown(event) {
       const target = event.target;
@@ -505,6 +661,16 @@ function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [canShowWorkspace, copyModKeys, moveSelection, selected?.key, selectedKeys, visible]);
+
+  useEffect(() => {
+    function suppressNativeContextMenu(event) {
+      if (isTextEntryTarget(event.target)) return;
+      event.preventDefault();
+    }
+
+    window.addEventListener('contextmenu', suppressNativeContextMenu);
+    return () => window.removeEventListener('contextmenu', suppressNativeContextMenu);
+  }, []);
 
   useEffect(() => {
     let unlistenMods;
@@ -834,7 +1000,6 @@ function App() {
         nextPatch.coverModifiedAt = null;
       }
       updateModInPayload(key, nextPatch);
-      setProviderKey(null);
       if (sourcePatch.source === 'modrinth' || sourcePatch.source === 'curseforge') {
         void handleRefreshProviderLabels(key);
       }
@@ -886,6 +1051,35 @@ function App() {
     },
     [updateModInPayload]
   );
+
+  const handleCatalogInstalled = useCallback(
+    async (result) => {
+      closeCatalogInstall();
+      setBusy(true);
+      setError('');
+      try {
+        let next = await scanMods();
+        const installedKeys = [...new Set(result?.installedKeys ?? [])];
+        if (installedKeys.length) {
+          await Promise.allSettled(installedKeys.map((key) => refreshModAssets(key)));
+          next = await scanMods();
+        }
+        applyPayload(next);
+        const installed =
+          next.mods?.find((mod) => mod.key === result?.mainKey) ?? next.mods?.[0] ?? null;
+        if (installed) {
+          setSelected(installed);
+          resetCatalogSearch();
+        }
+        setInfo('Мод установлен.');
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyPayload, closeCatalogInstall, resetCatalogSearch]
+  );
   const handleSelectMod = useCallback(
     (mod) => {
       if (!mod) return;
@@ -903,11 +1097,14 @@ function App() {
     },
     [mods, query, filter]
   );
-  const handleTableSelectDrag = useCallback((mod, select) => {
+  const handleTableSelectDrag = useCallback((mod, select, options = {}) => {
     setSelected(mod);
     setRelationsKey((current) => (current ? mod.key : current));
     selectionAnchorRef.current = mod.key;
     setSelectedKeys((current) => {
+      if (options.reset) {
+        return new Set([mod.key]);
+      }
       if (select) {
         if (current.has(mod.key)) return current;
         const next = new Set(current);
@@ -980,80 +1177,28 @@ function App() {
     ? 'Подготовка…'
     : '';
   const showProgress = bootstrapping || syncing || scanning;
+  const deleteBusy = deletingModKeys.size > 0;
+  const deleteConfirmMessage =
+    deleteConfirmFreshMods.length === 1
+      ? `Удалить ${deleteConfirmFreshMods[0].displayName}? Файл будет удалён из папки mods.`
+      : deleteConfirmFreshMods.length > 1
+      ? `Удалить ${deleteConfirmFreshMods.length} модов? Файлы будут удалены из папки mods.`
+      : '';
 
-  const toolbar = canShowWorkspace ? (
-    <div className="topToolbar" data-tauri-drag-region>
-      <img
-        src={headerAppLogo}
-        alt="Mod Manager"
-        className="topToolbarLogo"
-        data-tauri-drag-region
-      />
-      <div className="segments" data-tauri-drag-region>
-        {filters.map((item) => {
-          const isActive = filter === item.id;
-          const Icon = item.icon ?? SlidersHorizontal;
-          const showIcon = Boolean(item.icon) || !isActive;
-          return (
-            <button
-              key={item.id}
-              className={isActive ? 'active' : ''}
-              onClick={() => setFilter(item.id)}
-              type="button"
-              disabled={busy}
-              title={item.label}
-              aria-label={item.label}
-              data-tauri-drag-region="false"
-            >
-              {showIcon ? <Icon className={`tagIcon ${item.tone ?? ''}`} size={13} /> : null}
-              {isActive ? <span>{item.label}</span> : null}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          className={`segmentsSettings${settingsOpen ? ' active' : ''}`}
-          onClick={() => setSettingsOpen(true)}
-          disabled={busy}
-          aria-label="Настройки"
-          title="Настройки"
-          data-tauri-drag-region="false"
-        >
-          <Settings size={13} />
-        </button>
-      </div>
-      <label className="search" data-tauri-drag-region="false">
-        <Search size={14} />
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Поиск по названию или файлу"
-          data-tauri-drag-region="false"
-        />
-      </label>
-    </div>
-  ) : (
-    <div className="topToolbar topToolbarEmpty" data-tauri-drag-region>
-      <img
-        src={headerAppLogo}
-        alt="Mod Manager"
-        className="topToolbarLogo"
-        data-tauri-drag-region
-      />
-      <div className="segments" data-tauri-drag-region>
-        <button
-          type="button"
-          className={`segmentsSettings${settingsOpen ? ' active' : ''}`}
-          onClick={() => setSettingsOpen(true)}
-          disabled={busy}
-          aria-label="Настройки"
-          title="Настройки"
-          data-tauri-drag-region="false"
-        >
-          <Settings size={13} />
-        </button>
-      </div>
-    </div>
+  const toolbar = (
+    <AppToolbar
+      canShowWorkspace={canShowWorkspace}
+      query={query}
+      searchSource={catalogSource}
+      filter={filter}
+      settingsOpen={settingsOpen}
+      busy={busy}
+      onQueryChange={setQuery}
+      onClearQuery={clearCatalogQuery}
+      onToggleSearchSource={toggleSearchSource}
+      onFilterChange={setFilter}
+      onOpenSettings={() => setSettingsOpen(true)}
+    />
   );
 
   return (
@@ -1063,33 +1208,62 @@ function App() {
       <div className="appBody">
       {canShowWorkspace ? (
         <>
-          <section className="stats">
-            <Stat label="Клиент" value={stats.client} tone="client" />
-            <Stat label="Оба" value={stats.universal} tone="universal" />
-            <Stat label="Сервер" value={stats.server} tone="server" />
-            <Stat label="Сторонние" value={stats.noIndex} tone="manual" />
-          </section>
+          <StatsBar stats={stats} />
 
           <NoticeModal tone="bad" message={error} onClose={() => setError('')} />
           <NoticeModal tone="ok" message={info && !error && !bootstrapping && !syncing ? info : ''} onClose={() => setInfo('')} />
+          <NoticeModal
+            tone="bad"
+            message={deleteConfirmMessage}
+            onClose={() => setDeleteConfirmMods([])}
+            confirm={
+              deleteConfirmFreshMods.length
+                ? {
+                    busy: deleteBusy,
+                    confirmLabel: deleteBusy ? 'Удаление...' : 'Удалить',
+                    cancelLabel: 'Отмена',
+                    onConfirm: confirmDeleteMods,
+                    onCancel: () => setDeleteConfirmMods([])
+                  }
+                : null
+            }
+          />
 
-          <section className="workspace">
-            <ModTable
-              mods={visible}
-              selected={selected}
-              selectedKeys={selectedKeys}
-              sort={sort}
-              onSort={handleSort}
-              onSelect={handleTableSelect}
-              onSelectDrag={handleTableSelectDrag}
-              onCoverClick={openRelationsForMod}
-              onSourceClick={(mod) => setProviderKey(mod.key)}
-              onVersionClick={(mod) => setVersionKey(mod.key)}
-              onTagsClick={(mod) => setTagsKey(mod.key)}
-              onDescriptionClick={(mod) => setDescriptionKey(mod.key)}
-            />
+          <section className={`workspace${catalogMode ? ' workspaceCatalog' : ''}`}>
+            {catalogMode ? (
+              <div className="catalogSearchWrap">
+                <CatalogSearchPanel
+                  source={catalogSource}
+                  target={catalogTarget}
+                  results={catalogResults}
+                  loading={catalogLoading}
+                  error={catalogError}
+                  query={query}
+                  installedProjectIds={catalogInstalledProjectIds}
+                  onSelect={selectCatalogCandidate}
+                />
+              </div>
+            ) : (
+              <ModTable
+                mods={visible}
+                selected={selected}
+                selectedKeys={selectedKeys}
+                sort={sort}
+                onSort={handleSort}
+                onSelect={handleTableSelect}
+                onSelectDrag={handleTableSelectDrag}
+                onContextMenu={handleModContextMenu}
+                onCoverClick={openRelationsForMod}
+                onSourceClick={(mod) => setProviderKey(mod.key)}
+                onVersionClick={(mod) => setVersionKey(mod.key)}
+                onTagsClick={(mod) => setTagsKey(mod.key)}
+                onDescriptionClick={(mod) => setDescriptionKey(mod.key)}
+              />
+            )}
             <aside>
-              {selected ? (
+              {catalogMode ? (
+                <div className="empty">Выбери мод из каталога</div>
+              ) : selected ? (
                 <ModEditor
                   mod={selected}
                   mods={mods}
@@ -1115,13 +1289,24 @@ function App() {
       ) : (
         <section className="setupState">
           <h2>Выбери сборку</h2>
-          <p>Укажи папку инстанса PrismLauncher — обложки и зависимости подтянутся один раз в фоне.</p>
+          <p>Укажи папку сборки с minecraft/mods — обложки и зависимости подтянутся один раз в фоне.</p>
           <button type="button" onClick={() => setSettingsOpen(true)} disabled={busy || bootstrapping || syncing}>
             Открыть настройки
           </button>
         </section>
       )}
       </div>
+
+      <ModContextMenu
+        menu={modContextMenu}
+        count={contextMenuMods.length}
+        label={contextMenuLabel}
+        busy={busy || deleteBusy}
+        onClose={closeModContextMenu}
+        onCopy={handleContextCopyMods}
+        onOpenPage={contextMenuPageUrl ? handleContextOpenPage : undefined}
+        onDelete={handleContextDeleteMods}
+      />
 
       {showProgress ? (
         <footer className="prefetchProgressWrap">
@@ -1170,6 +1355,17 @@ function App() {
           onDismiss={updater.dismissModal}
         />
       ) : null}
+
+      <CatalogInstallDialog
+        candidate={catalogInstallSelection?.candidate}
+        source={catalogInstallSelection?.source}
+        busy={busy}
+        cacheScope={settings?.instanceRoot}
+        alreadyInstalled={catalogInstallAlreadyInstalled}
+        installedStateKey={catalogInstallInstalledStateKey}
+        onClose={() => !busy && closeCatalogInstall()}
+        onInstalled={handleCatalogInstalled}
+      />
 
       <ProviderDialog
         mod={providerMod}

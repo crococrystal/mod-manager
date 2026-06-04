@@ -457,8 +457,8 @@ h1 {
   min-width: 140px;
   max-width: 360px;
   height: 28px;
-  gap: 6px;
-  padding: 0 9px;
+  gap: 4px;
+  padding: 0 3px 0 8px;
   border: 1px solid #39454b;
   border-radius: 6px;
   background: #101416;
@@ -467,6 +467,7 @@ h1 {
 }
 
 .topToolbar .search input {
+  flex: 1;
   width: 100%;
   min-width: 0;
   height: 100%;
@@ -475,6 +476,31 @@ h1 {
   background: transparent;
   color: #e6e8ea;
   font-size: 12px;
+}
+
+.searchClear {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #9fa8ad;
+  cursor: pointer;
+}
+
+.searchClear:hover:not(:disabled) {
+  color: #e6e8ea;
+  background: #1c2327;
+}
+
+.searchClear:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .topToolbar .segments {
@@ -759,9 +785,131 @@ h1 {
   overflow: auto;
 }
 
-.tableWrapCmdSelecting {
+.selectedModDock {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  overflow: hidden;
+  border-block: 1px solid #3d5054;
+  background: #2a3b3c;
+  opacity: 0;
+  box-shadow: 0 10px 22px rgb(0 0 0 / 0.32);
+  pointer-events: none;
+  visibility: hidden;
+  will-change: transform;
+  contain: layout paint;
+  transform: translate3d(-9999px, -9999px, 0);
+}
+
+.selectedModDockVisible {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+}
+
+.selectedModDockBottom {
+  box-shadow: 0 -10px 22px rgb(0 0 0 / 0.32);
+}
+
+.selectedModDockTop {
+  border-top: 0;
+}
+
+.selectedModDockBottom {
+  border-bottom: 0;
+}
+
+.selectedModDock table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.selectedModDock tbody tr {
+  cursor: pointer;
+  background: #2a3b3c;
+}
+
+.selectedModDock tbody tr.selected {
+  background: #2a3b3c;
+}
+
+.selectedModDock td {
+  border-bottom: 0;
+}
+
+.tableWrapDragSelecting {
   overflow: hidden;
   overscroll-behavior: contain;
+}
+
+.modContextMenuLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  pointer-events: none;
+}
+
+.modContextMenu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  display: grid;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid #46545b;
+  border-radius: 10px;
+  background: #171d20;
+  box-shadow: 0 18px 42px rgb(0 0 0 / 0.42);
+  pointer-events: auto;
+}
+
+.modContextMenuCaption {
+  max-width: 280px;
+  padding: 5px 8px 7px;
+  border-bottom: 1px solid #303a3f;
+  color: #8f9aa1;
+  font-size: 11px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modContextMenu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 34px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #dce2e5;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.modContextMenu button:hover:not(:disabled) {
+  background: #243035;
+}
+
+.modContextMenu button.danger {
+  color: #ff9f9a;
+}
+
+.modContextMenu button.danger:hover:not(:disabled) {
+  background: #321f20;
+  color: #ffd1cd;
+}
+
+.modContextMenu button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .tableWrap table,
@@ -809,7 +957,6 @@ tbody tr:nth-child(even) {
   background: #202629;
 }
 
-tbody tr:hover,
 tbody tr.selected {
   background: #2a3b3c;
 }
@@ -1170,8 +1317,9 @@ td small {
   color: #f3c07c;
 }
 
-.providerModalStack {
-  width: min(420px, calc(100vw - 32px));
+.dependencyModalStack.providerModalStack {
+  width: min(740px, calc(100vw - 116px));
+  max-height: min(720px, calc(100vh - 136px));
 }
 
 .providerModalStack .dependencyModalHead {
@@ -1180,8 +1328,9 @@ td small {
 
 .providerModal {
   display: grid;
-  gap: 10px;
-  padding: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 14px;
 }
 
 .providerOption {
@@ -1212,9 +1361,14 @@ td small {
 }
 
 .providerOption:hover:not(:disabled),
-.providerOption.active {
+.providerOption.active,
+.providerOption.selected {
   border-color: #2dbd63;
   background: #14211b;
+}
+
+.providerOption.selected:not(.active) {
+  border-color: #58736a;
 }
 
 .providerOption:disabled {
@@ -1233,14 +1387,23 @@ td small {
 }
 
 .providerSearchError {
-  margin: 0 16px 8px;
+  margin: 0;
   color: #f3a68c;
   font-size: 13px;
+}
+
+.providerDescriptionPanel {
+  grid-column: 1 / -1;
+  height: 380px;
+  min-height: 380px;
+  max-height: 380px;
+  margin-top: 2px;
 }
 
 .providerCurrentLink {
   display: inline-flex;
   align-items: center;
+  align-self: flex-end;
   flex-shrink: 0;
   gap: 7px;
   color: #c8d1d6;
@@ -1254,27 +1417,19 @@ td small {
   color: #8de3bc;
 }
 
-.providerNotFoundLayer {
-  position: absolute;
-  inset: 0;
-  z-index: 1002;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  background: rgb(0 0 0 / 0.18);
+.providerCurrentLinkIcon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
 }
 
-.providerNotFoundModal {
+.providerSearchStatus {
   display: grid;
+  align-content: center;
   justify-items: center;
   gap: 12px;
-  width: min(340px, calc(100vw - 32px));
+  min-height: 100%;
   padding: 22px 20px;
-  border: 1px solid #48555c;
-  border-radius: 10px;
-  background: #171d20;
-  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
   text-align: center;
 }
 
@@ -1284,17 +1439,80 @@ td small {
   object-fit: contain;
 }
 
-.providerNotFoundModal strong {
+.providerSearchStatus strong {
   color: #eef2f3;
   font-size: 22px;
   line-height: 1.15;
 }
 
-.providerNotFoundModal p {
+.providerSearchStatus p {
   margin: 0;
   color: #a7b0b6;
   font-size: 13px;
   line-height: 1.4;
+}
+
+.providerFallbackHint {
+  max-width: 340px;
+}
+
+.providerFallbackList {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  margin-top: 16px;
+}
+
+.providerFallbackOption {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid #35444b;
+  border-radius: 8px;
+  background: #12171a;
+  color: #eef2f3;
+  text-align: left;
+}
+
+.providerFallbackOption:hover:not(:disabled) {
+  border-color: #2dbd63;
+  background: #14211b;
+}
+
+.providerFallbackOption img {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.providerFallbackIconPlaceholder {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: #1c2529;
+}
+
+.providerFallbackOption span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providerFallbackOption small {
+  color: #8de3bc;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.providerFallbackError {
+  color: #f3a68c;
 }
 
 .versionModalStack {
@@ -1477,6 +1695,34 @@ aside {
   line-height: 1.35;
   text-align: center;
   word-break: break-word;
+}
+
+.editorDeleteMod {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #5a3234;
+  border-radius: 7px;
+  background: #241819;
+  color: #ff9f9a;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.editorDeleteMod:hover:not(:disabled) {
+  border-color: #8f4848;
+  background: #331d1f;
+  color: #ffd1cd;
+}
+
+.editorDeleteMod:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .editorCoverFrame {
@@ -2140,6 +2386,10 @@ textarea:focus {
   padding: 0 4px;
 }
 
+.dependencyModalHeadBottom {
+  align-items: flex-end;
+}
+
 .dependencyModalHeadText {
   display: flex;
   flex: 1;
@@ -2154,6 +2404,10 @@ textarea:focus {
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
+}
+
+.dependencyModalTitleRowBottom {
+  align-items: flex-end;
 }
 
 .dependencyModalTitle {

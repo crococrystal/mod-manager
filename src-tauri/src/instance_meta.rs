@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path};
 
 use crate::{
@@ -6,7 +6,7 @@ use crate::{
     settings::InstancePaths,
 };
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InstanceTarget {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,6 +70,63 @@ pub(crate) fn version_matches_target(
         }
     }
     true
+}
+
+/// Facets для Modrinth `/v2/search` (AND между группами, OR внутри группы).
+pub(crate) fn modrinth_search_facets_json(target: &InstanceTarget) -> String {
+    let mut groups: Vec<Vec<String>> = vec![vec!["project_type:mod".to_string()]];
+    if let Some(version) = target
+        .minecraft_version
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        groups.push(vec![format!("versions:{version}")]);
+    }
+    if let Some(loader) = target
+        .loader
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        groups.push(vec![format!("categories:{loader}")]);
+    }
+    serde_json::to_string(&groups).unwrap_or_else(|_| r#"[["project_type:mod"]]"#.to_string())
+}
+
+pub(crate) fn curseforge_mod_loader_type(loader: &str) -> Option<u8> {
+    match loader.trim().to_ascii_lowercase().as_str() {
+        "forge" => Some(1),
+        "fabric" => Some(4),
+        "quilt" => Some(5),
+        "neoforge" => Some(6),
+        _ => None,
+    }
+}
+
+/// Доп. query-параметры для CurseForge `mods/search`.
+pub(crate) fn curseforge_search_query_suffix(target: &InstanceTarget) -> String {
+    let mut parts = Vec::new();
+    if let Some(version) = target
+        .minecraft_version
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        parts.push(format!("gameVersion={}", urlencoding::encode(version)));
+    }
+    if let Some(loader) = target
+        .loader
+        .as_deref()
+        .and_then(curseforge_mod_loader_type)
+    {
+        parts.push(format!("modLoaderType={loader}"));
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!("&{}", parts.join("&"))
+    }
 }
 
 pub(crate) fn target_has_filters(target: &InstanceTarget) -> bool {

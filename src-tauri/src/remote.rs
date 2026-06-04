@@ -2,6 +2,9 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
+use crate::instance_meta::{
+    curseforge_search_query_suffix, modrinth_search_facets_json, InstanceTarget,
+};
 use crate::mod_names::{
     hyphenated_to_spaced, is_version_or_loader_segment, mod_name_tokens, normalized_match_key,
     slug_key, spaced_camel_case, strip_filename_decorations, strip_qualifiers,
@@ -11,8 +14,8 @@ use crate::mods::ModEntry;
 use crate::settings::Settings;
 
 pub(crate) const PROVIDER_SEARCH_LIMIT: usize = 5;
-/// Один запрос search к API поставщика (limit=5 внутри ответа).
-const PROVIDER_SEARCH_QUERY_LIMIT: usize = 1;
+const PROVIDER_SEARCH_FETCH_LIMIT: usize = 50;
+const PROVIDER_SEARCH_QUERY_LIMIT: usize = 6;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,6 +23,8 @@ pub struct ProviderCandidate {
     pub id: String,
     pub slug: Option<String>,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
     pub icon_url: Option<String>,
     #[serde(default)]
     pub exact_file_match: bool,
@@ -135,6 +140,7 @@ fn search_queries_from_display_name(display_name: &str) -> Vec<String> {
     let stripped = strip_version_suffixes(&trimmed);
     let spaced = tokens.join(" ");
     let underscored = tokens.join("_");
+    let slugged = slug_key(&stripped);
     let hyphen_spaced = if spaced.is_empty() {
         hyphenated_to_spaced(&stripped)
     } else {
@@ -144,6 +150,7 @@ fn search_queries_from_display_name(display_name: &str) -> Vec<String> {
     let mut queries = Vec::new();
     for candidate in [
         spaced.as_str(),
+        slugged.as_str(),
         underscored.as_str(),
         hyphen_spaced.as_str(),
         camel.as_str(),
@@ -153,10 +160,63 @@ fn search_queries_from_display_name(display_name: &str) -> Vec<String> {
     ] {
         push_unique_query(&mut queries, candidate);
     }
+    for token in tokens {
+        if token.len() >= 4 {
+            push_unique_query(&mut queries, &token);
+        }
+    }
     queries
 }
 
+fn candidate_has_name_overlap(display_name: &str, candidate: &ProviderCandidate) -> bool {
+    let tokens: Vec<String> = mod_name_tokens(display_name)
+        .into_iter()
+        .filter(|token| token.len() >= 4 && !is_version_or_loader_segment(token))
+        .map(|token| token.to_ascii_lowercase())
+        .collect();
+    if tokens.is_empty() {
+        return candidate_match_score(display_name, candidate) > 0;
+    }
+
+    let hay = format!(
+        "{} {}",
+        candidate.title,
+        candidate.slug.as_deref().unwrap_or_default()
+    )
+    .to_ascii_lowercase();
+
+    tokens.iter().any(|token| {
+        hay.contains(token)
+            || token
+                .strip_suffix('s')
+                .filter(|short| short.len() >= 4)
+                .is_some_and(|short| hay.contains(short))
+    })
+}
+
+fn candidate_exact_name_match(display_name: &str, candidate: &ProviderCandidate) -> bool {
+    let (name_keys, slug_keys) = match_keys_for_display_name(display_name);
+    let title_key = normalized_match_key(&candidate.title);
+    if !title_key.is_empty() && name_keys.contains(&title_key) {
+        return true;
+    }
+    if let Some(slug) = candidate.slug.as_deref() {
+        let slug_norm = normalized_match_key(slug);
+        if !slug_norm.is_empty() && name_keys.contains(&slug_norm) {
+            return true;
+        }
+        let slug_slug = slug_key(slug);
+        if !slug_slug.is_empty() && slug_keys.contains(&slug_slug) {
+            return true;
+        }
+    }
+    false
+}
+
 pub(crate) fn candidate_match_score(display_name: &str, candidate: &ProviderCandidate) -> u32 {
+    if candidate_exact_name_match(display_name, candidate) {
+        return 1000;
+    }
     let project = ProviderProject {
         id: candidate.id.clone(),
         slug: candidate.slug.clone(),
@@ -164,7 +224,7 @@ pub(crate) fn candidate_match_score(display_name: &str, candidate: &ProviderCand
         project_type: Some("mod".to_string()),
     };
     if modrinth_project_matches(&project, display_name) {
-        return 1000;
+        return 900;
     }
     if provider_project_matches(&project, display_name) {
         return 800;
@@ -343,6 +403,82 @@ pub(crate) fn curseforge_get(
         .ok()
 }
 
+pub(crate) fn modrinth_project_body(
+    client: &reqwest::blocking::Client,
+    project_id: &str,
+) -> Option<String> {
+    let payload = modrinth_project(client, project_id)?;
+    payload
+        .get("body")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+pub(crate) fn curseforge_project_description(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    project_id: &str,
+) -> Option<String> {
+    if let Some(payload) =
+        curseforge_get(client, api_key, &format!("mods/{project_id}/description"))
+    {
+        if let Some(description) = payload
+            .get("data")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Some(description.to_string());
+        }
+    }
+
+    let payload = curseforge_get(client, api_key, &format!("mods/{project_id}"))?;
+    let data = payload.get("data")?;
+    let mut parts = Vec::new();
+    if let Some(summary) = data.get("summary").and_then(|value| value.as_str()) {
+        let trimmed = summary.trim();
+        if !trimmed.is_empty() {
+            parts.push(trimmed.to_string());
+        }
+    }
+    if let Some(items) = data.get("screenshots").and_then(|value| value.as_array()) {
+        for item in items {
+            let url = item
+                .get("url")
+                .and_then(|value| value.as_str())
+                .or_else(|| item.get("thumbnailUrl").and_then(|value| value.as_str()));
+            if let Some(url) = url.filter(|value| !value.is_empty()) {
+                parts.push(format!("![]({url})"));
+            }
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
+}
+
+pub(crate) fn fetch_catalog_project_description(
+    client: &reqwest::blocking::Client,
+    settings: &Settings,
+    source: &str,
+    project_id: &str,
+) -> Option<String> {
+    match source {
+        "modrinth" => modrinth_project_body(client, project_id),
+        "curseforge" => {
+            if settings.curseforge_api_key.trim().is_empty() {
+                return None;
+            }
+            curseforge_project_description(client, &settings.curseforge_api_key, project_id)
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn curseforge_mod_info(
     client: &reqwest::blocking::Client,
     api_key: &str,
@@ -517,20 +653,46 @@ fn modrinth_hit_to_project(hit: &serde_json::Value) -> Option<ProviderProject> {
     })
 }
 
+pub(crate) const CATALOG_SEARCH_LIMIT: usize = 25;
+
+pub(crate) fn search_catalog_modrinth(
+    client: &reqwest::blocking::Client,
+    query: &str,
+    target: &InstanceTarget,
+) -> Vec<ProviderCandidate> {
+    fetch_modrinth_search_batch(client, query, CATALOG_SEARCH_LIMIT, Some(target))
+}
+
+pub(crate) fn search_catalog_curseforge(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    query: &str,
+    target: &InstanceTarget,
+) -> Vec<ProviderCandidate> {
+    fetch_curseforge_search_batch(client, api_key, query, CATALOG_SEARCH_LIMIT, Some(target))
+}
+
 fn fetch_modrinth_search_batch(
     client: &reqwest::blocking::Client,
     query_text: &str,
     limit: usize,
+    target: Option<&InstanceTarget>,
 ) -> Vec<ProviderCandidate> {
-    let query = urlencoding::encode(query_text.trim());
-    if query.is_empty() {
-        return Vec::new();
-    }
-    let facets = urlencoding::encode(r#"[["project_type:mod"]]"#);
-    let Ok(payload) = client
-        .get(format!(
+    let trimmed = query_text.trim();
+    let facets_raw = target
+        .map(modrinth_search_facets_json)
+        .unwrap_or_else(|| r#"[["project_type:mod"]]"#.to_string());
+    let facets = urlencoding::encode(&facets_raw);
+    let url = if trimmed.is_empty() {
+        format!("https://api.modrinth.com/v2/search?limit={limit}&index=downloads&facets={facets}")
+    } else {
+        let query = urlencoding::encode(trimmed);
+        format!(
             "https://api.modrinth.com/v2/search?query={query}&limit={limit}&index=relevance&facets={facets}"
-        ))
+        )
+    };
+    let Ok(payload) = client
+        .get(url)
         .send()
         .and_then(|response| response.error_for_status())
         .and_then(|response| response.json::<serde_json::Value>())
@@ -555,6 +717,7 @@ fn fetch_modrinth_search_batch(
                     .title
                     .filter(|value| !value.is_empty())
                     .unwrap_or_else(|| "Без названия".to_string()),
+                summary: non_empty_json_string(hit.get("description")),
                 icon_url: non_empty_json_string(hit.get("icon_url")),
                 exact_file_match: false,
                 match_score: 0,
@@ -570,16 +733,24 @@ pub(crate) fn list_modrinth_candidates(
     let mut seen = std::collections::HashSet::new();
     let mut candidates = Vec::new();
     for query_text in search_queries_for_api(display_name) {
-        for candidate in fetch_modrinth_search_batch(client, &query_text, PROVIDER_SEARCH_LIMIT) {
+        for candidate in
+            fetch_modrinth_search_batch(client, &query_text, PROVIDER_SEARCH_FETCH_LIMIT, None)
+        {
             if seen.insert(candidate.id.clone()) {
                 candidates.push(candidate);
             }
         }
-        if candidates.len() >= PROVIDER_SEARCH_LIMIT {
-            break;
-        }
     }
     sort_candidates_by_relevance(display_name, &mut candidates);
+    let exact_candidates: Vec<ProviderCandidate> = candidates
+        .iter()
+        .filter(|candidate| candidate_exact_name_match(display_name, candidate))
+        .cloned()
+        .collect();
+    if !exact_candidates.is_empty() {
+        return exact_candidates;
+    }
+    candidates.retain(|candidate| candidate_has_name_overlap(display_name, candidate));
     candidates.truncate(PROVIDER_SEARCH_LIMIT);
     candidates
 }
@@ -589,19 +760,26 @@ fn fetch_curseforge_search_batch(
     api_key: &str,
     query_text: &str,
     limit: usize,
+    target: Option<&InstanceTarget>,
 ) -> Vec<ProviderCandidate> {
     if api_key.trim().is_empty() {
         return Vec::new();
     }
-    let query = urlencoding::encode(query_text.trim());
-    if query.is_empty() {
-        return Vec::new();
-    }
-    let Some(payload) = curseforge_get(
-        client,
-        api_key,
-        &format!("mods/search?gameId=432&classId=6&searchFilter={query}&pageSize={limit}"),
-    ) else {
+    let trimmed = query_text.trim();
+    let target_suffix = target
+        .map(curseforge_search_query_suffix)
+        .unwrap_or_default();
+    let path = if trimmed.is_empty() {
+        format!(
+            "mods/search?gameId=432&classId=6&sortField=6&sortOrder=desc&pageSize={limit}{target_suffix}"
+        )
+    } else {
+        let query = urlencoding::encode(trimmed);
+        format!(
+            "mods/search?gameId=432&classId=6&searchFilter={query}&pageSize={limit}{target_suffix}"
+        )
+    };
+    let Some(payload) = curseforge_get(client, api_key, &path) else {
         return Vec::new();
     };
     let items = payload
@@ -630,6 +808,7 @@ fn fetch_curseforge_search_batch(
                     .and_then(|value| value.as_str())
                     .map(str::to_string),
                 title,
+                summary: non_empty_json_string(item.get("summary")),
                 icon_url,
                 exact_file_match: false,
                 match_score: 0,
@@ -649,18 +828,28 @@ pub(crate) fn list_curseforge_candidates(
     let mut seen = std::collections::HashSet::new();
     let mut candidates = Vec::new();
     for query_text in search_queries_for_api(display_name) {
-        for candidate in
-            fetch_curseforge_search_batch(client, api_key, &query_text, PROVIDER_SEARCH_LIMIT)
-        {
+        for candidate in fetch_curseforge_search_batch(
+            client,
+            api_key,
+            &query_text,
+            PROVIDER_SEARCH_FETCH_LIMIT,
+            None,
+        ) {
             if seen.insert(candidate.id.clone()) {
                 candidates.push(candidate);
             }
         }
-        if candidates.len() >= PROVIDER_SEARCH_LIMIT {
-            break;
-        }
     }
     sort_candidates_by_relevance(display_name, &mut candidates);
+    let exact_candidates: Vec<ProviderCandidate> = candidates
+        .iter()
+        .filter(|candidate| candidate_exact_name_match(display_name, candidate))
+        .cloned()
+        .collect();
+    if !exact_candidates.is_empty() {
+        return exact_candidates;
+    }
+    candidates.retain(|candidate| candidate_has_name_overlap(display_name, candidate));
     candidates.truncate(PROVIDER_SEARCH_LIMIT);
     candidates
 }
@@ -689,6 +878,7 @@ pub(crate) fn curseforge_candidate_for_project(
             .and_then(|value| value.as_str())
             .map(str::to_string),
         title,
+        summary: non_empty_json_string(data.get("summary")),
         icon_url,
         exact_file_match: false,
         match_score: 0,
@@ -712,6 +902,12 @@ pub(crate) fn modrinth_candidate_for_project(
             .map(str::to_string)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "Без названия".to_string()),
+        summary: payload
+            .get("description")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
         icon_url: non_empty_json_string(payload.get("icon_url")),
         exact_file_match: false,
         match_score: 0,

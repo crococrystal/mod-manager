@@ -21,7 +21,14 @@ use crate::settings::{read_settings, resolve_paths, InstancePaths, Settings};
 use crate::tags::{read_tags, write_tags};
 use crate::util::{file_mtime_millis, now_iso, path_string};
 
+mod install_catalog;
 mod versions;
+pub(crate) use install_catalog::{
+    catalog_project_details, install_from_catalog, preview_catalog_install, search_catalog,
+    CatalogInstallPreview, CatalogInstallPreviewRequest, CatalogInstallRequest,
+    CatalogInstallResult, CatalogProjectDetails, CatalogProjectDetailsRequest,
+    CatalogSearchRequest, CatalogSearchResponse,
+};
 pub(crate) use versions::{
     install_version, list_versions, InstallProviderVersionRequest, InstallProviderVersionResult,
     ListProviderVersionsRequest, ProviderVersionsPayload,
@@ -114,13 +121,24 @@ pub(crate) async fn search_candidates(
         };
 
         if candidates.is_empty() {
-            return Err(format!("Ничего не найдено на {}.", target));
+            return Err(format!(
+                "На {} нет совпадения по файлу и имени.",
+                provider_label(target.as_str())
+            ));
         }
 
         Ok(candidates)
     })
     .await
     .map_err(|error| format!("Поиск поставщика прерван: {error}"))?
+}
+
+fn provider_label(source: &str) -> &'static str {
+    match source {
+        "modrinth" => "Modrinth",
+        "curseforge" => "CurseForge",
+        _ => "поставщике",
+    }
 }
 
 pub(crate) async fn lookup_fingerprint(

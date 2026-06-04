@@ -253,7 +253,7 @@ export function SettingsDialog({ settings, busy, syncing = false, onClose, onSav
               <input
                 value={draft.instanceRoot ?? ''}
                 readOnly
-                placeholder="/Users/.../PrismLauncher/instances/Pack"
+                placeholder="/Users/.../minecraft/mods или папка сборки"
               />
               <Button icon={FolderOpen} onClick={pickFolder} disabled={packLocked}>
                 Выбрать
