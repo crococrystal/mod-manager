@@ -127,9 +127,10 @@ export function ServerSyncPathField({
                 overlayUi.previewParts ? 'serverSyncPathOverlay--preview' : '',
                 showDoneResult ? 'serverSyncPathOverlay--preview' : '',
                 doneDismissible ||
-                (overlayUi.ok && !overlayUi.previewParts && !showDoneResult)
+                (overlayUi.ok && !overlayUi.previewParts && !showDoneResult && !overlayUi.warning)
                   ? 'serverSyncPathOverlay--ok'
                   : '',
+                overlayUi.warning ? 'serverSyncPathOverlay--warning' : '',
                 overlayUi.error ? 'serverSyncPathOverlay--error' : ''
               ]
                 .filter(Boolean)

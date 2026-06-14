@@ -8,6 +8,7 @@ export function serverControlToOverlayUi({
   awaitingLaunch,
   checked,
   running,
+  ready,
   error,
   message
 }) {
@@ -31,12 +32,15 @@ export function serverControlToOverlayUi({
   }
 
   if (checked) {
+    const booting = running && !ready;
     const main =
-      message?.trim() || (running ? 'Сервер запущен' : 'Сервер выключен');
+      message?.trim() ||
+      (booting ? 'Сервер запускается' : running ? 'Сервер запущен' : 'Сервер выключен');
     return {
       ...EMPTY_PREVIEW_OVERLAY,
       ready: true,
-      ok: running,
+      ok: running && ready,
+      warning: booting,
       error: false,
       main
     };

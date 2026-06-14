@@ -1,6 +1,7 @@
 mod backend;
 mod launch_script;
 mod os;
+pub(crate) mod readiness;
 pub(crate) mod start_config;
 
 use serde::{Deserialize, Serialize};
@@ -83,6 +84,7 @@ fn resolve_context(
 pub(crate) struct ServerControlStatusResult {
     pub ok: bool,
     pub running: bool,
+    pub ready: bool,
     pub remote_os: String,
     pub message: String,
 }
@@ -92,6 +94,7 @@ pub(crate) struct ServerControlStatusResult {
 pub(crate) struct ServerControlActionResult {
     pub ok: bool,
     pub running: bool,
+    pub ready: bool,
     pub remote_os: String,
     pub message: String,
 }
@@ -182,6 +185,36 @@ fn write_launch_script_inner(
     })
 }
 
+fn status_message(running: bool, ready: bool) -> String {
+    match (running, ready) {
+        (false, _) => "Сервер выключен.".to_string(),
+        (true, true) => "Сервер запущен.".to_string(),
+        (true, false) => "Сервер запускается.".to_string(),
+    }
+}
+
+fn already_running_message(ready: bool) -> String {
+    if ready {
+        "Сервер уже запущен.".to_string()
+    } else {
+        "Сервер запускается.".to_string()
+    }
+}
+
+fn resolve_runtime_status(
+    backend: &dyn backend::RemoteServerBackend,
+    host: &str,
+    server_root: &str,
+) -> Result<(bool, bool), String> {
+    let running = backend.is_running(host, server_root)?;
+    let ready = if running {
+        backend.is_ready(host, server_root)?
+    } else {
+        false
+    };
+    Ok((running, ready))
+}
+
 fn check_inner(settings: &Settings, request: ServerControlRequest) -> Result<ServerControlStatusResult, String> {
     let ctx = resolve_context(
         settings,
@@ -190,17 +223,13 @@ fn check_inner(settings: &Settings, request: ServerControlRequest) -> Result<Ser
     )?;
     let backend = backend_for(ctx.remote_os);
     backend.validate_server_root(&ctx.host, &ctx.server_root)?;
-    let running = backend.is_running(&ctx.host, &ctx.server_root)?;
-    let message = if running {
-        "Сервер запущен.".to_string()
-    } else {
-        "Сервер выключен.".to_string()
-    };
+    let (running, ready) = resolve_runtime_status(backend.as_ref(), &ctx.host, &ctx.server_root)?;
     Ok(ServerControlStatusResult {
         ok: true,
         running,
+        ready,
         remote_os: ctx.remote_os.as_str().to_string(),
-        message,
+        message: status_message(running, ready),
     })
 }
 
@@ -213,11 +242,13 @@ fn start_inner(settings: &Settings, request: ServerControlRequest) -> Result<Ser
     let backend = backend_for(ctx.remote_os);
     backend.validate_server_root(&ctx.host, &ctx.server_root)?;
     if backend.is_running(&ctx.host, &ctx.server_root)? {
+        let ready = backend.is_ready(&ctx.host, &ctx.server_root)?;
         return Ok(ServerControlActionResult {
             ok: true,
             running: true,
+            ready,
             remote_os: ctx.remote_os.as_str().to_string(),
-            message: "Сервер уже запущен.".to_string(),
+            message: already_running_message(ready),
         });
     }
     ctx.start.validate_for_start()?;
@@ -225,6 +256,7 @@ fn start_inner(settings: &Settings, request: ServerControlRequest) -> Result<Ser
     Ok(ServerControlActionResult {
         ok: true,
         running: false,
+        ready: false,
         remote_os: ctx.remote_os.as_str().to_string(),
         message: "Команда отправлена. Ждём java 15–60 с…".to_string(),
     })
@@ -242,6 +274,7 @@ fn stop_inner(settings: &Settings, request: ServerControlRequest) -> Result<Serv
         return Ok(ServerControlActionResult {
             ok: true,
             running: false,
+            ready: false,
             remote_os: ctx.remote_os.as_str().to_string(),
             message: "Сервер уже выключен.".to_string(),
         });
@@ -252,6 +285,7 @@ fn stop_inner(settings: &Settings, request: ServerControlRequest) -> Result<Serv
     Ok(ServerControlActionResult {
         ok: !running,
         running,
+        ready: false,
         remote_os: ctx.remote_os.as_str().to_string(),
         message: if running {
             "Не удалось остановить сервер.".to_string()

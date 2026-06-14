@@ -3890,6 +3890,10 @@ dd {
   color: #8fd4b8;
 }
 
+.serverSyncPathOverlay--warning {
+  color: #f0c27a;
+}
+
 .serverSyncPathOverlay--error {
   color: #f0c27a;
 }

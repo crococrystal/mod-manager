@@ -6,6 +6,7 @@ use super::os::RemoteOs;
 pub(crate) trait RemoteServerBackend {
     fn validate_server_root(&self, host: &str, server_root: &str) -> Result<(), String>;
     fn is_running(&self, host: &str, server_root: &str) -> Result<bool, String>;
+    fn is_ready(&self, host: &str, server_root: &str) -> Result<bool, String>;
     fn start(
         &self,
         host: &str,
@@ -39,6 +40,10 @@ impl RemoteServerBackend for WindowsBackend {
         windows::is_running(host, server_root)
     }
 
+    fn is_ready(&self, host: &str, server_root: &str) -> Result<bool, String> {
+        windows::is_ready(host, server_root)
+    }
+
     fn start(
         &self,
         host: &str,
@@ -65,6 +70,10 @@ impl RemoteServerBackend for LinuxBackend {
 
     fn is_running(&self, host: &str, server_root: &str) -> Result<bool, String> {
         linux::is_running(host, server_root)
+    }
+
+    fn is_ready(&self, host: &str, server_root: &str) -> Result<bool, String> {
+        linux::is_ready(host, server_root)
     }
 
     fn start(

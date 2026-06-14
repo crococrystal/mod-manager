@@ -23,8 +23,10 @@ const EMPTY_SYNC_LANE = {
   filename: ''
 };
 
-const LAUNCH_POLL_ATTEMPTS = 12;
-const LAUNCH_POLL_INTERVAL_MS = 5000;
+const JAVA_POLL_ATTEMPTS = 12;
+const READY_POLL_ATTEMPTS = 120;
+const POLL_INTERVAL_MS = 5000;
+const BOOT_POLL_INTERVAL_MS = 5000;
 
 function sleep(ms) {
   return new Promise((resolve) => {
@@ -45,6 +47,7 @@ export function ServerControlPanel({
 }) {
   const [checked, setChecked] = useState(false);
   const [running, setRunning] = useState(false);
+  const [ready, setReady] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [checking, setChecking] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -64,6 +67,7 @@ export function ServerControlPanel({
   const hasSsh = Boolean(sshHost?.trim());
   const hasServerRoot = Boolean(serverRootPath?.trim());
   const hasScript = Boolean(serverStartScript?.trim());
+  const booting = checked && running && !ready;
   const rowBusy = checking || starting || stopping || awaitingLaunch;
   const controlDisabled =
     disabled || rowBusy || actionBusy || !hasSsh || !hasServerRoot;
@@ -73,6 +77,7 @@ export function ServerControlPanel({
   const resetStatus = useCallback(() => {
     setChecked(false);
     setRunning(false);
+    setReady(false);
     setStatusMessage('');
     setError('');
   }, []);
@@ -80,6 +85,7 @@ export function ServerControlPanel({
   const applyResult = useCallback((result) => {
     setChecked(true);
     setRunning(Boolean(result?.running));
+    setReady(Boolean(result?.ready));
     setStatusMessage(result?.message ?? '');
   }, []);
 
@@ -98,6 +104,7 @@ export function ServerControlPanel({
     } catch (err) {
       setChecked(false);
       setRunning(false);
+      setReady(false);
       setStatusMessage('');
       setError(String(err));
     } finally {
@@ -111,8 +118,10 @@ export function ServerControlPanel({
     setAwaitingLaunch(true);
     setError('');
 
-    for (let attempt = 1; attempt <= LAUNCH_POLL_ATTEMPTS; attempt += 1) {
-      await sleep(LAUNCH_POLL_INTERVAL_MS);
+    let hasJava = false;
+
+    for (let attempt = 1; attempt <= JAVA_POLL_ATTEMPTS; attempt += 1) {
+      await sleep(POLL_INTERVAL_MS);
       if (launchPollRef.current !== pollId) {
         return;
       }
@@ -125,12 +134,17 @@ export function ServerControlPanel({
           return;
         }
         if (result?.running) {
+          hasJava = true;
           applyResult(result);
-          setAwaitingLaunch(false);
-          return;
+          if (result?.ready) {
+            setAwaitingLaunch(false);
+            return;
+          }
+          break;
         }
         setChecked(true);
         setRunning(false);
+        setReady(false);
         setStatusMessage(`Запуск… ${attempt * 5} с, java пока нет`);
       } catch (err) {
         if (launchPollRef.current !== pollId) {
@@ -145,20 +159,78 @@ export function ServerControlPanel({
     if (launchPollRef.current !== pollId) {
       return;
     }
-    setAwaitingLaunch(false);
-    try {
-      const result = await checkServerControlStatus({
-        sshHost: sshHost?.trim() || undefined,
-        serverRootPath: serverRootPath?.trim() || undefined
-      });
-      applyResult(result);
-      setError(
-        'Java не появился. Проверьте скрипт (карандаш): java в PATH, корень сервера, для run.bat — nogui (добавляется автоматически).'
-      );
-    } catch (err) {
-      setError(String(err));
+
+    if (!hasJava) {
+      setAwaitingLaunch(false);
+      try {
+        const result = await checkServerControlStatus({
+          sshHost: sshHost?.trim() || undefined,
+          serverRootPath: serverRootPath?.trim() || undefined
+        });
+        applyResult(result);
+        setError(
+          'Java не появился. Проверьте скрипт (карандаш): java в PATH, корень сервера, для run.bat — nogui (добавляется автоматически).'
+        );
+      } catch (err) {
+        setError(String(err));
+      }
+      return;
     }
+
+    for (let attempt = 1; attempt <= READY_POLL_ATTEMPTS; attempt += 1) {
+      await sleep(POLL_INTERVAL_MS);
+      if (launchPollRef.current !== pollId) {
+        return;
+      }
+      try {
+        const result = await checkServerControlStatus({
+          sshHost: sshHost?.trim() || undefined,
+          serverRootPath: serverRootPath?.trim() || undefined
+        });
+        if (launchPollRef.current !== pollId) {
+          return;
+        }
+        if (!result?.running) {
+          applyResult(result);
+          setAwaitingLaunch(false);
+          setError('Сервер остановился во время загрузки.');
+          return;
+        }
+        applyResult(result);
+        if (result?.ready) {
+          setAwaitingLaunch(false);
+          return;
+        }
+        setStatusMessage(`Сервер запускается… ${attempt * 5} с`);
+      } catch (err) {
+        if (launchPollRef.current !== pollId) {
+          return;
+        }
+        setAwaitingLaunch(false);
+        setError(String(err));
+        return;
+      }
+    }
+
+    if (launchPollRef.current !== pollId) {
+      return;
+    }
+    setAwaitingLaunch(false);
   }, [applyResult, serverRootPath, sshHost]);
+
+  useEffect(() => {
+    if (!booting || rowBusy || !hasSsh || !hasServerRoot) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void checkStatus();
+    }, BOOT_POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [booting, checkStatus, hasServerRoot, hasSsh, rowBusy]);
 
   const startServer = useCallback(async () => {
     launchPollRef.current += 1;
@@ -175,12 +247,13 @@ export function ServerControlPanel({
         setError(result.message);
         return;
       }
-      if (!result?.running) {
+      if (!result?.running || !result?.ready) {
         void pollLaunchStatus();
       }
     } catch (err) {
       setChecked(false);
       setRunning(false);
+      setReady(false);
       setStatusMessage('');
       setError(String(err));
     } finally {
@@ -189,6 +262,8 @@ export function ServerControlPanel({
   }, [applyResult, pollLaunchStatus, serverRootPath, sshHost]);
 
   const stopServer = useCallback(async () => {
+    launchPollRef.current += 1;
+    setAwaitingLaunch(false);
     setStopping(true);
     setError('');
     try {
@@ -203,6 +278,7 @@ export function ServerControlPanel({
     } catch (err) {
       setChecked(false);
       setRunning(false);
+      setReady(false);
       setStatusMessage('');
       setError(String(err));
     } finally {
@@ -231,12 +307,13 @@ export function ServerControlPanel({
   });
 
   const previewUi = serverControlToOverlayUi({
-    checking: checking || awaitingLaunch,
+    checking: checking || (awaitingLaunch && !running),
     starting,
     stopping,
     awaitingLaunch,
     checked,
     running,
+    ready,
     error,
     message: statusMessage
   });

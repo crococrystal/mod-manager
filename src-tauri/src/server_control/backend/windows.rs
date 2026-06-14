@@ -2,6 +2,7 @@ use std::process::Output;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 
+use crate::server_control::readiness;
 use crate::server_control::start_config::ServerStartConfig;
 use crate::ssh_exec::{ssh_command, ssh_command_background};
 use crate::ssh_util::ssh_command_failed;
@@ -136,6 +137,21 @@ pub(crate) fn validate_server_root(host: &str, server_root: &str) -> Result<(), 
     } else {
         Err(remote_command_failed(host, &output))
     }
+}
+
+pub(crate) fn is_ready(host: &str, server_root: &str) -> Result<bool, String> {
+    let script = format!(
+        "{assign}
+        $log = Join-Path $root 'logs\\latest.log'
+        if (-not (Test-Path -LiteralPath $log)) {{ exit 0 }}
+        Get-Content -LiteralPath $log -Tail 120 -ErrorAction SilentlyContinue | Out-String",
+        assign = assign_root(server_root)
+    );
+    let output = run_powershell(host, &script)?;
+    if !output.status.success() {
+        return Err(remote_command_failed(host, &output));
+    }
+    Ok(readiness::is_log_ready(&String::from_utf8_lossy(&output.stdout)))
 }
 
 pub(crate) fn is_running(host: &str, server_root: &str) -> Result<bool, String> {
