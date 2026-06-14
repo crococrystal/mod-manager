@@ -7,6 +7,8 @@ import {
   cancelBackgroundTask,
   copyModFiles,
   deleteModFiles,
+  disableModFiles,
+  enableModFiles,
   deleteCustomCover,
   getSettings,
   identifyModSources,
@@ -390,6 +392,8 @@ function App() {
     results: catalogResults,
     target: catalogTarget,
     loading: catalogLoading,
+    loadingMore: catalogLoadingMore,
+    hasMore: catalogHasMore,
     error: catalogError,
     updatesBlocked: catalogUpdatesBlocked,
     installSelection: catalogInstallSelection,
@@ -397,7 +401,8 @@ function App() {
     clearQuery: clearCatalogQuery,
     reset: resetCatalogSearch,
     selectCandidate: selectCatalogCandidate,
-    closeInstall: closeCatalogInstall
+    closeInstall: closeCatalogInstall,
+    loadMore: loadMoreCatalogResults
   } = useCatalogSearch({
     query,
     setQuery,
@@ -719,6 +724,8 @@ function App() {
     modContextMenu?.mode === 'updates' || contextMenuMods.length !== 1
       ? null
       : contextMenuMods[0].sourceUrl;
+  const contextMenuCanDisable = contextMenuMods.some((item) => !item.disabled);
+  const contextMenuCanEnable = contextMenuMods.some((item) => item.disabled);
 
   const closeModContextMenu = useCallback(() => {
     setModContextMenu(null);
@@ -757,6 +764,50 @@ function App() {
   const handleContextDeleteMods = useCallback(() => {
     requestDeleteMods(contextMenuMods);
   }, [contextMenuMods, requestDeleteMods]);
+
+  const handleContextDisableMods = useCallback(async () => {
+    const keys = contextMenuMods.filter((item) => !item.disabled).map((item) => item.key);
+    if (!keys.length) return;
+    setModContextMenu(null);
+    setBusy(true);
+    setError('');
+    try {
+      await disableModFiles(keys);
+      const next = await scanMods();
+      applyPayload(next);
+      setInfo(
+        keys.length === 1
+          ? `Мод отключён: ${contextMenuMods.find((item) => item.key === keys[0])?.displayName ?? 'мод'}.`
+          : `Отключено модов: ${keys.length}.`
+      );
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [applyPayload, contextMenuMods]);
+
+  const handleContextEnableMods = useCallback(async () => {
+    const keys = contextMenuMods.filter((item) => item.disabled).map((item) => item.key);
+    if (!keys.length) return;
+    setModContextMenu(null);
+    setBusy(true);
+    setError('');
+    try {
+      await enableModFiles(keys);
+      const next = await scanMods();
+      applyPayload(next);
+      setInfo(
+        keys.length === 1
+          ? `Мод включён: ${contextMenuMods.find((item) => item.key === keys[0])?.displayName ?? 'мод'}.`
+          : `Включено модов: ${keys.length}.`
+      );
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [applyPayload, contextMenuMods]);
 
   const handleContextUpdateMods = useCallback(() => {
     const keys = contextMenuMods.map((item) => item.key);
@@ -1578,6 +1629,8 @@ function App() {
                   target={catalogTarget}
                   results={catalogResults}
                   loading={catalogLoading}
+                  loadingMore={catalogLoadingMore}
+                  hasMore={catalogHasMore}
                   error={catalogError}
                   updatesBlocked={catalogUpdatesBlocked}
                   updatesCheckedAtMs={updatesInitBlocked || !updatesReady ? null : updatesCheckedAtMs}
@@ -1613,6 +1666,7 @@ function App() {
                         }
                       : undefined
                   }
+                  onLoadMore={catalogSource === 'updates' ? undefined : loadMoreCatalogResults}
                 />
               </div>
             ) : (
@@ -1702,6 +1756,16 @@ function App() {
         onClose={closeModContextMenu}
         onCopy={handleContextCopyMods}
         onOpenPage={contextMenuPageUrl ? handleContextOpenPage : undefined}
+        onDisable={
+          modContextMenu?.mode === 'updates' || !contextMenuCanDisable
+            ? undefined
+            : handleContextDisableMods
+        }
+        onEnable={
+          modContextMenu?.mode === 'updates' || !contextMenuCanEnable
+            ? undefined
+            : handleContextEnableMods
+        }
         onUpdate={modContextMenu?.mode === 'updates' ? handleContextUpdateMods : undefined}
         onDelete={handleContextDeleteMods}
       />

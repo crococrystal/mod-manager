@@ -1,4 +1,4 @@
-use crate::server_control::readiness;
+use crate::server_control::readiness::{self, DONE_MARKER};
 use crate::server_control::start_config::ServerStartConfig;
 use crate::ssh_exec::ssh_command;
 use crate::ssh_util::ssh_command_failed;
@@ -20,12 +20,21 @@ pub(crate) fn validate_server_root(host: &str, server_root: &str) -> Result<(), 
 
 pub(crate) fn is_ready(host: &str, server_root: &str) -> Result<bool, String> {
     let root = shell_single_quoted(server_root);
-    let cmd = format!("tail -c 65536 {root}/logs/latest.log 2>/dev/null || true");
+    let cmd = format!(
+        "log={root}/logs/latest.log; \
+         if [ ! -f \"$log\" ]; then exit 0; fi; \
+         awk 'index($0, \"{done_marker}\") {{ lastDone=NR }} \
+              tolower($0) ~ /modlauncher running|starting minecraft server on|preparing spawn area/ {{ lastBoot=NR }} \
+              END {{ if (lastDone>0 && (lastBoot==0 || lastDone>lastBoot)) print \"ready\" }}' \"$log\"",
+        done_marker = DONE_MARKER
+    );
     let output = ssh_command(host, &cmd)?;
     if !output.status.success() {
         return Err(ssh_command_failed(host, &output));
     }
-    Ok(readiness::is_log_ready(&String::from_utf8_lossy(&output.stdout)))
+    Ok(readiness::stdout_indicates_ready(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 pub(crate) fn is_running(host: &str, server_root: &str) -> Result<bool, String> {

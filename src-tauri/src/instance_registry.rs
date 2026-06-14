@@ -110,10 +110,12 @@ pub fn mods_fingerprint_dirs(
         let entries = fs::read_dir(mods_dir).map_err(|e| e.to_string())?;
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("jar") {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let is_mod_file = path.extension().and_then(|ext| ext.to_str()) == Some("jar")
+                || name.ends_with(".jar.disable");
+            if !is_mod_file {
                 continue;
             }
-            let name = entry.file_name().to_string_lossy().to_string();
             let mtime_ms = fs::metadata(&path)
                 .ok()
                 .and_then(|meta| meta.modified().ok())

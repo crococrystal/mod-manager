@@ -2,6 +2,7 @@ mod backend;
 mod launch_script;
 mod os;
 pub(crate) mod readiness;
+pub(crate) mod rcon;
 pub(crate) mod start_config;
 
 use serde::{Deserialize, Serialize};
@@ -258,7 +259,7 @@ fn start_inner(settings: &Settings, request: ServerControlRequest) -> Result<Ser
         running: false,
         ready: false,
         remote_os: ctx.remote_os.as_str().to_string(),
-        message: "Команда отправлена. Ждём java 15–60 с…".to_string(),
+        message: "Инициализация сервера…".to_string(),
     })
 }
 
@@ -279,8 +280,14 @@ fn stop_inner(settings: &Settings, request: ServerControlRequest) -> Result<Serv
             message: "Сервер уже выключен.".to_string(),
         });
     }
-    backend.stop(&ctx.host, &ctx.server_root, &ctx.start)?;
-    std::thread::sleep(std::time::Duration::from_millis(800));
+    if let Err(stop_error) = backend.stop(&ctx.host, &ctx.server_root, &ctx.start) {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        if backend.is_running(&ctx.host, &ctx.server_root)? {
+            return Err(stop_error);
+        }
+    } else {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+    }
     let running = backend.is_running(&ctx.host, &ctx.server_root)?;
     Ok(ServerControlActionResult {
         ok: !running,
@@ -293,6 +300,108 @@ fn stop_inner(settings: &Settings, request: ServerControlRequest) -> Result<Serv
             "Сервер остановлен.".to_string()
         },
     })
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RconCheckResult {
+    pub ok: bool,
+    pub port: Option<u16>,
+    pub connect_host: Option<String>,
+    pub ssh_alias: Option<String>,
+    pub via_tunnel: bool,
+    pub properties_path: Option<String>,
+    pub detail: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RconCommandRequest {
+    #[serde(default)]
+    pub ssh_host: Option<String>,
+    #[serde(default)]
+    pub server_root_path: Option<String>,
+    pub command: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RconCommandResult {
+    pub ok: bool,
+    pub output: String,
+    pub message: String,
+}
+
+fn check_rcon_inner(
+    settings: &Settings,
+    request: ServerControlRequest,
+) -> Result<RconCheckResult, String> {
+    let ctx = resolve_context(
+        settings,
+        request.ssh_host.as_deref(),
+        request.server_root_path.as_deref(),
+    )?;
+    let info = rcon::test_rcon(&ctx.host, &ctx.server_root, ctx.remote_os)?;
+    Ok(RconCheckResult {
+        ok: true,
+        port: Some(info.port),
+        connect_host: Some(info.connect_host),
+        ssh_alias: Some(info.ssh_alias),
+        via_tunnel: info.via_tunnel,
+        properties_path: Some(info.properties_path),
+        detail: info.detail,
+        message: info.message,
+    })
+}
+
+fn send_rcon_inner(settings: &Settings, request: RconCommandRequest) -> Result<RconCommandResult, String> {
+    let ctx = resolve_context(
+        settings,
+        request.ssh_host.as_deref(),
+        request.server_root_path.as_deref(),
+    )?;
+    let output = rcon::send_rcon_command(
+        &ctx.host,
+        &ctx.server_root,
+        ctx.remote_os,
+        &request.command,
+    )?;
+    Ok(RconCommandResult {
+        ok: true,
+        output: output.clone(),
+        message: if output.is_empty() {
+            "Команда выполнена.".to_string()
+        } else {
+            output
+        },
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn check_server_rcon(
+    app: AppHandle,
+    request: Option<ServerControlRequest>,
+) -> Result<RconCheckResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = read_settings(&app)?;
+        check_rcon_inner(&settings, request.unwrap_or_default())
+    })
+    .await
+    .map_err(|error| format!("{error}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn send_server_rcon_command(
+    app: AppHandle,
+    request: RconCommandRequest,
+) -> Result<RconCommandResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = read_settings(&app)?;
+        send_rcon_inner(&settings, request)
+    })
+    .await
+    .map_err(|error| format!("{error}"))?
 }
 
 #[tauri::command]

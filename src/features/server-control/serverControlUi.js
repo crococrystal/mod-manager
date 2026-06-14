@@ -1,6 +1,23 @@
 import { Play, RefreshCw, Square } from 'lucide-react';
 import { EMPTY_PREVIEW_OVERLAY } from '../server-sync/serverSyncPreviewUi.js';
 
+export function formatBootStatusMessage({
+  awaitingLaunch,
+  starting,
+  running,
+  ready,
+  elapsedSec
+}) {
+  const seconds = Math.max(1, elapsedSec);
+  if ((awaitingLaunch || starting) && !running) {
+    return `Инициализация сервера… ${seconds} с`;
+  }
+  if (running && !ready) {
+    return `Сервер запускается… ${seconds} с`;
+  }
+  return null;
+}
+
 export function serverControlToOverlayUi({
   checking,
   starting,
@@ -10,15 +27,27 @@ export function serverControlToOverlayUi({
   running,
   ready,
   error,
-  message
+  message,
+  showBootTimer = false,
+  bootElapsedSec = 0
 }) {
+  const timedMessage = formatBootStatusMessage({
+    awaitingLaunch,
+    starting,
+    running,
+    ready,
+    elapsedSec: bootElapsedSec
+  });
+  const bootPending = showBootTimer && Boolean(timedMessage);
+
   if (checking || starting || stopping) {
-    const pollMessage = awaitingLaunch && message?.trim();
     return {
       ...EMPTY_PREVIEW_OVERLAY,
       checking,
-      starting: starting || stopping,
-      main: pollMessage || (starting ? 'Запуск…' : stopping ? 'Остановка…' : 'Проверка…')
+      starting: starting || stopping || bootPending,
+      main:
+        timedMessage ||
+        (starting ? 'Запуск…' : stopping ? 'Остановка…' : 'Проверка…')
     };
   }
 
@@ -34,6 +63,7 @@ export function serverControlToOverlayUi({
   if (checked) {
     const booting = running && !ready;
     const main =
+      timedMessage ||
       message?.trim() ||
       (booting ? 'Сервер запускается' : running ? 'Сервер запущен' : 'Сервер выключен');
     return {
@@ -41,6 +71,7 @@ export function serverControlToOverlayUi({
       ready: true,
       ok: running && ready,
       warning: booting,
+      starting: bootPending,
       error: false,
       main
     };

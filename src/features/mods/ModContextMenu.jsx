@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Copy, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
+import { Copy, ExternalLink, Power, PowerOff, RefreshCw, Trash2 } from 'lucide-react';
 import { getModalPortalRoot } from '../../lib/modalPortal.js';
 
 const EDGE_PADDING = 8;
@@ -13,6 +13,8 @@ export function ModContextMenu({
   onClose,
   onCopy,
   onOpenPage,
+  onDisable,
+  onEnable,
   onUpdate,
   onDelete
 }) {
@@ -78,6 +80,18 @@ export function ModContextMenu({
           <button type="button" role="menuitem" onClick={onOpenPage} disabled={busy}>
             <ExternalLink size={15} />
             Открыть страницу
+          </button>
+        ) : null}
+        {onDisable ? (
+          <button type="button" role="menuitem" onClick={onDisable} disabled={busy}>
+            <PowerOff size={15} />
+            {count > 1 ? 'Отключить выбранные' : 'Отключить мод'}
+          </button>
+        ) : null}
+        {onEnable ? (
+          <button type="button" role="menuitem" onClick={onEnable} disabled={busy}>
+            <Power size={15} />
+            {count > 1 ? 'Включить выбранные' : 'Включить мод'}
           </button>
         ) : null}
         <button

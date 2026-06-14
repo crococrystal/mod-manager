@@ -88,16 +88,28 @@
 .catalogSearchPanel {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
-  height: 100%;
+  overflow: hidden;
 }
 
 .catalogSearchPanel .catalogSearchList,
 .catalogSearchPanel .tableWrap {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
+}
+
+.catalogSearchPanel .tableWrap {
   overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.catalogSearchSentinel {
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
 }
 
 .updatesModTable th:nth-child(1),

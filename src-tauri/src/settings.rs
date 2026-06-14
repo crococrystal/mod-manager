@@ -104,10 +104,13 @@ impl InstancePaths {
 
     pub(crate) fn mod_jar_candidates(&self, filename: &str) -> Vec<PathBuf> {
         let mut candidates = Vec::new();
+        let disabled_filename = crate::mods::disabled_mod_disk_filename(filename);
         for dir in self.all_mods_dirs() {
-            let path = dir.join(filename);
-            if path.is_file() {
-                candidates.push(path);
+            for name in [filename, disabled_filename.as_str()] {
+                let path = dir.join(name);
+                if path.is_file() {
+                    candidates.push(path);
+                }
             }
         }
         candidates
@@ -115,7 +118,34 @@ impl InstancePaths {
 
     pub(crate) fn resolve_mod_jar(&self, filename: &str) -> Option<PathBuf> {
         let candidates = self.mod_jar_candidates(filename);
-        select_canonical_mod_jar(self, filename, &candidates)
+        let active: Vec<PathBuf> = candidates
+            .iter()
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| !name.ends_with(".jar.disable"))
+            })
+            .cloned()
+            .collect();
+        if !active.is_empty() {
+            return select_canonical_mod_jar(self, filename, &active);
+        }
+        let disabled: Vec<PathBuf> = candidates
+            .into_iter()
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.ends_with(".jar.disable"))
+            })
+            .collect();
+        if disabled.is_empty() {
+            return None;
+        }
+        select_canonical_mod_jar(
+            self,
+            &crate::mods::disabled_mod_disk_filename(filename),
+            &disabled,
+        )
     }
 
     pub(crate) fn mod_jar_dir(&self, filename: &str) -> PathBuf {

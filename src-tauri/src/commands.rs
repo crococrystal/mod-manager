@@ -14,7 +14,7 @@ use crate::dependencies::{
     filter_reverse_jar_dependency_keys, jar_dependencies_by_key, same_dependency_list,
 };
 use crate::instance_registry;
-use crate::mods::{merge_keys, normalize_side, scan_mods_for_settings, stats_for, ModListPayload};
+use crate::mods::{merge_keys, normalize_side, scan_mods_for_settings, stats_for, ModListPayload, disabled_mod_disk_filename};
 use crate::mods_watch;
 use crate::prefetch::{identify_unknown_sources, sync_mods_unified, SyncFlags};
 use crate::provider_labels::{
@@ -77,6 +77,20 @@ pub(crate) struct RefreshModAssetsResult {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeleteModFilesResult {
     pub removed: u32,
+    pub filenames: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DisableModFilesResult {
+    pub disabled: u32,
+    pub filenames: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EnableModFilesResult {
+    pub enabled: u32,
     pub filenames: Vec<String>,
 }
 
@@ -506,17 +520,17 @@ pub(crate) async fn refresh_provider_labels(
 
     tauri::async_runtime::spawn_blocking(move || {
         let mods = scan_mods_for_settings(&settings, catalog_root)?;
-        let Some(item) = mods.iter().find(|entry| entry.key == request.key).cloned() else {
+        let Some(item) = crate::server_sync::find_mod_for_sync_key(&mods, &request.key).cloned() else {
             return Err("Мод не найден.".to_string());
         };
         let mut tags = read_tags(&paths.tags_path)?;
-        let tag = tags.mods.entry(request.key.clone()).or_default();
+        let tag = tags.mods.entry(item.key.clone()).or_default();
         fetch_and_store_provider_labels(tag, &item, &settings)?;
         tag.updated_at = now_iso();
         tags.updated_at = now_iso();
         write_tags(&paths.tags_path, &tags)?;
-        let tag = tags.mods.get(&request.key).cloned().unwrap_or_default();
-        Ok(refresh_result_for(&tag, &request.key))
+        let tag = tags.mods.get(&item.key).cloned().unwrap_or_default();
+        Ok(refresh_result_for(&tag, &item.key))
     })
     .await
     .map_err(|error| format!("Обновление меток прервано: {error}"))?
@@ -677,6 +691,7 @@ pub(crate) async fn delete_mod_files(
         let cache_cover_dir = cover_dir(&paths.data_root, false);
         let manual_cover_dir = cover_dir(&paths.data_root, true);
         let mut filenames = Vec::new();
+        let mut remote_deletes = Vec::new();
 
         mods_watch::suppress_events_for(Duration::from_secs(4));
 
@@ -722,6 +737,10 @@ pub(crate) async fn delete_mod_files(
                 }
             }
             filenames.push(item.filename.clone());
+            remote_deletes.push((
+                item.filename.clone(),
+                crate::server_sync::sync_upload_side(&paths, key, &item.side).to_string(),
+            ));
             tags.mods.remove(&item.key);
             remove_cover_variants(&cache_cover_dir, &item.key);
             remove_cover_variants(&manual_cover_dir, &item.key);
@@ -734,6 +753,10 @@ pub(crate) async fn delete_mod_files(
         tags.updated_at = now_iso();
         write_tags(&paths.tags_path, &tags)?;
 
+        for (filename, side) in remote_deletes {
+            crate::server_sync::schedule_delete_mod(&app_handle, filename, side);
+        }
+
         Ok(DeleteModFilesResult {
             removed: filenames.len() as u32,
             filenames,
@@ -741,6 +764,139 @@ pub(crate) async fn delete_mod_files(
     })
     .await
     .map_err(|error| format!("Удаление модов прервано: {error}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn disable_mod_files(
+    app: AppHandle,
+    keys: Vec<String>,
+) -> Result<DisableModFilesResult, String> {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<DisableModFilesResult, String> {
+        let key_set: HashSet<String> = keys.into_iter().filter(|key| !key.is_empty()).collect();
+        if key_set.is_empty() {
+            return Err("Нечего отключать.".to_string());
+        }
+
+        let settings = read_settings(&app_handle)?;
+        let paths = resolve_paths(&settings)?;
+        let catalog_root = catalog::catalog_root(&app_handle).ok();
+        let mods = scan_mods_for_settings(&settings, catalog_root)?;
+        let mut filenames = Vec::new();
+
+        mods_watch::suppress_events_for(Duration::from_secs(4));
+
+        for key in &key_set {
+            let Some(item) = mods.iter().find(|entry| entry.key.as_str() == key.as_str()) else {
+                continue;
+            };
+            if item.disabled {
+                continue;
+            }
+            let disabled_name = disabled_mod_disk_filename(&item.filename);
+            let mut renamed_any = false;
+
+            for mods_dir in paths.all_mods_dirs() {
+                let jar_path = mods_dir.join(&item.filename);
+                if !jar_path.is_file() {
+                    continue;
+                }
+                let disabled_path = mods_dir.join(&disabled_name);
+                if disabled_path.exists() {
+                    return Err(format!(
+                        "Файл уже отключён: {disabled_name}"
+                    ));
+                }
+                fs::rename(&jar_path, &disabled_path).map_err(|error| {
+                    format!("Не удалось отключить {}: {error}", item.filename)
+                })?;
+                renamed_any = true;
+            }
+
+            if renamed_any {
+                filenames.push(item.filename.clone());
+                crate::server_sync::schedule_disable_mod(&app_handle, item.filename.clone());
+            }
+        }
+
+        if filenames.is_empty() {
+            return Err("Не найдено файлов для отключения.".to_string());
+        }
+
+        Ok(DisableModFilesResult {
+            disabled: filenames.len() as u32,
+            filenames,
+        })
+    })
+    .await
+    .map_err(|error| format!("Отключение модов прервано: {error}"))?
+}
+
+#[tauri::command]
+pub(crate) async fn enable_mod_files(
+    app: AppHandle,
+    keys: Vec<String>,
+) -> Result<EnableModFilesResult, String> {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<EnableModFilesResult, String> {
+        let key_set: HashSet<String> = keys.into_iter().filter(|key| !key.is_empty()).collect();
+        if key_set.is_empty() {
+            return Err("Нечего включать.".to_string());
+        }
+
+        let settings = read_settings(&app_handle)?;
+        let paths = resolve_paths(&settings)?;
+        let catalog_root = catalog::catalog_root(&app_handle).ok();
+        let mods = scan_mods_for_settings(&settings, catalog_root)?;
+        let mut filenames = Vec::new();
+
+        mods_watch::suppress_events_for(Duration::from_secs(4));
+
+        for key in &key_set {
+            let Some(item) = mods.iter().find(|entry| entry.key.as_str() == key.as_str()) else {
+                continue;
+            };
+            if !item.disabled {
+                continue;
+            }
+            let disabled_name = disabled_mod_disk_filename(&item.filename);
+            let mut renamed_any = false;
+
+            for mods_dir in paths.all_mods_dirs() {
+                let disabled_path = mods_dir.join(&disabled_name);
+                if !disabled_path.is_file() {
+                    continue;
+                }
+                let jar_path = mods_dir.join(&item.filename);
+                if jar_path.exists() {
+                    return Err(format!(
+                        "Файл уже включён: {}",
+                        item.filename
+                    ));
+                }
+                fs::rename(&disabled_path, &jar_path).map_err(|error| {
+                    format!("Не удалось включить {}: {error}", item.filename)
+                })?;
+                renamed_any = true;
+            }
+
+            if renamed_any {
+                filenames.push(item.filename.clone());
+                crate::server_sync::schedule_enable_mod(&app_handle, item.filename.clone());
+            }
+        }
+
+        if filenames.is_empty() {
+            return Err("Не найдено отключённых файлов.".to_string());
+        }
+
+        Ok(EnableModFilesResult {
+            enabled: filenames.len() as u32,
+            filenames,
+        })
+    })
+    .await
+    .map_err(|error| format!("Включение модов прервано: {error}"))?
 }
 
 #[derive(Clone, Debug, Serialize)]

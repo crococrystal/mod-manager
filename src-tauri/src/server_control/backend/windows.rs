@@ -2,7 +2,7 @@ use std::process::Output;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 
-use crate::server_control::readiness;
+use crate::server_control::readiness::{self, DONE_MARKER};
 use crate::server_control::start_config::ServerStartConfig;
 use crate::ssh_exec::{ssh_command, ssh_command_background};
 use crate::ssh_util::ssh_command_failed;
@@ -19,13 +19,33 @@ fn encode_powershell(script: &str) -> String {
     STANDARD.encode(bytes)
 }
 
+fn wrap_powershell(script: &str) -> String {
+    format!(
+        "$ProgressPreference='SilentlyContinue';$WarningPreference='SilentlyContinue';$ErrorActionPreference='Stop';{script}"
+    )
+}
+
 fn run_powershell(host: &str, script: &str) -> Result<Output, String> {
-    let encoded = encode_powershell(script);
-    ssh_command(host, &format!("powershell -NoProfile -EncodedCommand {encoded}"))
+    let encoded = encode_powershell(&wrap_powershell(script));
+    ssh_command(
+        host,
+        &format!("powershell -NoProfile -NonInteractive -EncodedCommand {encoded}"),
+    )
 }
 
 fn explain_remote_error(detail: &str) -> Option<String> {
     let text = detail.trim();
+    if text.contains("CLIXML") || text.contains("<Objs Version=") {
+        return Some(
+            "Ошибка PowerShell на сервере. Проверьте SSH и доступ к logs/latest.log.".to_string(),
+        );
+    }
+    if text.contains("MM_STOP_FAILED") {
+        return Some("Не удалось остановить сервер.".to_string());
+    }
+    if text.contains("MM_LOG_READ_FAILED") {
+        return Some("Не удалось прочитать logs/latest.log.".to_string());
+    }
     if text.contains("MM_SCRIPT_NOT_FOUND") {
         return Some("Скрипт запуска не найден в корне сервера.".to_string());
     }
@@ -48,11 +68,21 @@ fn explain_remote_error(detail: &str) -> Option<String> {
 }
 
 fn remote_command_failed(host: &str, output: &Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let raw_stderr = String::from_utf8_lossy(&output.stderr);
+    let raw_stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = readiness::clean_powershell_stdout(&raw_stderr);
+    let stdout = readiness::clean_powershell_stdout(&raw_stdout);
     let detail = if !stderr.is_empty() { stderr } else { stdout };
     if let Some(message) = explain_remote_error(&detail) {
         return message;
+    }
+    if detail.is_empty()
+        && (readiness::contains_clixml(&raw_stderr) || readiness::contains_clixml(&raw_stdout))
+    {
+        return readiness::clixml_noise_message().to_string();
+    }
+    if !detail.is_empty() {
+        return crate::ssh_util::explain_ssh_error(host, &detail);
     }
     ssh_command_failed(host, &output)
 }
@@ -144,14 +174,40 @@ pub(crate) fn is_ready(host: &str, server_root: &str) -> Result<bool, String> {
         "{assign}
         $log = Join-Path $root 'logs\\latest.log'
         if (-not (Test-Path -LiteralPath $log)) {{ exit 0 }}
-        Get-Content -LiteralPath $log -Tail 120 -ErrorAction SilentlyContinue | Out-String",
-        assign = assign_root(server_root)
+        $lastDone = 0
+        $lastBoot = 0
+        $lineNo = 0
+        try {{
+            $stream = [System.IO.File]::Open($log, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            $reader = New-Object System.IO.StreamReader($stream)
+            try {{
+                while ($null -ne ($line = $reader.ReadLine())) {{
+                    $lineNo++
+                    if ($line.Contains('{done_marker}')) {{ $lastDone = $lineNo }}
+                    $lower = $line.ToLowerInvariant()
+                    if ($lower.Contains('modlauncher running') -or $lower.Contains('starting minecraft server on') -or $lower.Contains('preparing spawn area')) {{
+                        $lastBoot = $lineNo
+                    }}
+                }}
+            }} finally {{
+                $reader.Dispose()
+                $stream.Dispose()
+            }}
+        }} catch {{
+            Write-Error 'MM_LOG_READ_FAILED'
+            exit 1
+        }}
+        if ($lastDone -gt 0 -and ($lastBoot -eq 0 -or $lastDone -gt $lastBoot)) {{ Write-Output 'ready' }}",
+        assign = assign_root(server_root),
+        done_marker = DONE_MARKER
     );
     let output = run_powershell(host, &script)?;
     if !output.status.success() {
         return Err(remote_command_failed(host, &output));
     }
-    Ok(readiness::is_log_ready(&String::from_utf8_lossy(&output.stdout)))
+    Ok(readiness::stdout_indicates_ready(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 pub(crate) fn is_running(host: &str, server_root: &str) -> Result<bool, String> {
@@ -174,9 +230,10 @@ pub(crate) fn is_running(host: &str, server_root: &str) -> Result<bool, String> 
     if !output.status.success() {
         return Err(remote_command_failed(host, &output));
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .eq_ignore_ascii_case("running"))
+    Ok(
+        readiness::clean_powershell_stdout(&String::from_utf8_lossy(&output.stdout))
+            .eq_ignore_ascii_case("running"),
+    )
 }
 
 pub(crate) fn start(host: &str, server_root: &str, start: &ServerStartConfig) -> Result<(), String> {
@@ -220,12 +277,22 @@ pub(crate) fn stop(host: &str, server_root: &str, start: &ServerStartConfig) -> 
         }})
         $targets = @($javaProcs + $cmdProcs)
         if (-not $targets) {{ exit 0 }}
-        $targets | ForEach-Object {{
-            & taskkill /F /T /PID $_.ProcessId 2>$null | Out-Null
-            if (Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue) {{
-                Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop
-            }}
-        }}",
+        foreach ($proc in $targets) {{
+            try {{
+                & taskkill /F /T /PID $proc.ProcessId 2>$null | Out-Null
+            }} catch {{}}
+            try {{
+                Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+            }} catch {{}}
+        }}
+        $still = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {{
+            if ($_.Name -ne 'java.exe' -and $_.Name -ne 'cmd.exe') {{ return $false }}
+            if (-not $_.CommandLine) {{ return $false }}
+            $cmdNorm = $_.CommandLine.Replace('\\', '/').ToLower()
+            ($_.Name -eq 'java.exe' -and ($cmdNorm.Contains($marker) -or $cmdNorm.Contains($rootKey))) -or
+            ($_.Name -eq 'cmd.exe' -and ($cmdNorm.Contains($rootKey) -or {script_predicate}))
+        }})
+        if ($still.Count -gt 0) {{ throw 'MM_STOP_FAILED' }}",
         assign = assign_root(server_root),
         neo = neo_marker_block(),
         script_match = script_match,

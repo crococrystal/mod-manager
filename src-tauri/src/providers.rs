@@ -9,7 +9,7 @@ use crate::covers::{
 };
 use crate::events::{emit_cover_ready, emit_mod_source_ready};
 use crate::file_identity::read_file_identity;
-use crate::mods::{source_url, ModEntry};
+use crate::mods::{source_url, ModEntry, UNKNOWN_SIDE};
 use crate::provider_labels::fetch_and_store_provider_labels;
 use crate::remote::{
     curseforge_candidate_for_project, curseforge_fingerprint_match, curseforge_mod_info,
@@ -581,7 +581,7 @@ fn cover_item_for_switch(
         display_name,
         display_name_locked: true,
         installed_version: None,
-        side: "universal".to_string(),
+        side: UNKNOWN_SIDE.to_string(),
         library: false,
         technical: false,
         description: String::new(),
@@ -610,12 +610,13 @@ fn cover_item_for_switch(
         duplicate: false,
         modified_at: now_iso(),
         side_mode: "auto".to_string(),
-        manual_side: "universal".to_string(),
+        manual_side: UNKNOWN_SIDE.to_string(),
         manual_library: false,
         manual_technical: false,
-        provider_side: "universal".to_string(),
+        provider_side: UNKNOWN_SIDE.to_string(),
         provider_library: false,
         provider_technical: false,
+        disabled: false,
     }
 }
 
@@ -658,8 +659,9 @@ fn mod_entry_for_label_fetch(
         manual_side: tag.side.clone(),
         manual_library: tag.library,
         manual_technical: tag.technical,
-        provider_side: "universal".to_string(),
+        provider_side: UNKNOWN_SIDE.to_string(),
         provider_library: false,
         provider_technical: false,
+        disabled: false,
     }
 }

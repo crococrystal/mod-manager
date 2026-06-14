@@ -17,8 +17,8 @@ use crate::file_identity::read_file_identity;
 use crate::mods::{merge_keys, scan_mods_for_settings};
 use crate::provider_labels::{
     build_curseforge_labels, build_modrinth_labels, curseforge_side_is_ambiguous,
-    finalize_curseforge_labels, link_modrinth_ids_for_curseforge_mods, provider_tags_for,
-    refresh_result_for,
+    finalize_curseforge_labels, link_modrinth_ids_for_curseforge_mods, refresh_result_for,
+    sync_stored_side_from_provider,
 };
 use crate::remote::{
     curseforge_cover_url_from_payload, curseforge_dependencies_from_payload,
@@ -434,23 +434,13 @@ pub(crate) fn sync_mods_unified(
                 // - провайдерские метки для этого мода тянутся впервые (fetched_at был пустой).
                 // Это гарантирует, что после очистки данных переключение на ручной режим
                 // покажет осмысленный side (client/server/universal с поставщика),
-                // а не дефолтный "universal". Если пользователь уже что-то трогал —
+                // а не «неизвестно». Если пользователь уже что-то трогал —
                 // ручные значения не перезаписываем.
-                let provider_was_empty = tag.provider_labels.fetched_at.is_empty();
-                let manual_was_empty = tag.side.is_empty() && !tag.library && !tag.technical;
-
                 tag.provider_labels = store;
                 tag.updated_at = now_iso();
+                sync_stored_side_from_provider(tag);
                 tag_dirty = true;
                 report.labels_refreshed += 1;
-
-                if provider_was_empty && manual_was_empty {
-                    let (provider_side, provider_library, provider_technical) =
-                        provider_tags_for(tag);
-                    tag.side = provider_side;
-                    tag.library = provider_library;
-                    tag.technical = provider_technical;
-                }
 
                 let result = refresh_result_for(tag, &item.key);
                 emit_labels_ready(

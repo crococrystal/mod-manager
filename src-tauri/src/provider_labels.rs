@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::mods::{normalize_side, ModEntry};
+use crate::mods::{normalize_side, ModEntry, UNKNOWN_SIDE};
 use crate::remote::{curseforge_get, curseforge_mod_info, http_client, modrinth_project, modrinth_version};
 use crate::settings::Settings;
 use crate::tags::{ModTags, ProviderLabelsStore};
@@ -35,9 +35,9 @@ pub(crate) fn resolve_side(tag: &ModTags) -> String {
         return stored_side(tag);
     }
     if tag.provider_labels.fetched_at.is_empty() {
-        return normalize_side("universal");
+        return UNKNOWN_SIDE.to_string();
     }
-    map_provider_side(&tag.provider_labels).unwrap_or_else(|| normalize_side("universal"))
+    map_provider_side(&tag.provider_labels).unwrap_or_else(|| UNKNOWN_SIDE.to_string())
 }
 
 pub(crate) fn resolve_library(tag: &ModTags) -> bool {
@@ -84,13 +84,33 @@ pub(crate) fn manual_tags_for(tag: &ModTags) -> (String, bool, bool) {
 
 pub(crate) fn provider_tags_for(tag: &ModTags) -> (String, bool, bool) {
     if tag.provider_labels.fetched_at.is_empty() {
-        return (normalize_side("universal"), false, false);
+        return (UNKNOWN_SIDE.to_string(), false, false);
     }
     (
-        map_provider_side(&tag.provider_labels).unwrap_or_else(|| normalize_side("universal")),
+        map_provider_side(&tag.provider_labels).unwrap_or_else(|| UNKNOWN_SIDE.to_string()),
         map_provider_library(&tag.provider_labels),
         map_provider_technical(&tag.provider_labels),
     )
+}
+
+fn manual_side_is_unset(tag: &ModTags) -> bool {
+    if side_mode_for(tag) == "manual" {
+        return false;
+    }
+    if tag.library || tag.technical {
+        return false;
+    }
+    tag.side.is_empty() || tag.side == "universal" || tag.side == UNKNOWN_SIDE
+}
+
+pub(crate) fn sync_stored_side_from_provider(tag: &mut ModTags) {
+    if side_mode_for(tag) == "manual" || !manual_side_is_unset(tag) {
+        return;
+    }
+    let (provider_side, provider_library, provider_technical) = provider_tags_for(tag);
+    tag.side = provider_side;
+    tag.library = provider_library;
+    tag.technical = provider_technical;
 }
 
 pub(crate) fn refresh_provider_labels_bulk(
@@ -101,10 +121,7 @@ pub(crate) fn refresh_provider_labels_bulk(
 ) -> Result<usize, String> {
     let candidates: Vec<&ModEntry> = mods
         .iter()
-        .filter(|item| {
-            (item.source == "modrinth" || item.source == "curseforge")
-                && (item.modrinth_id.is_some() || item.curseforge_id.is_some())
-        })
+        .filter(|item| item.modrinth_id.is_some() || item.curseforge_id.is_some())
         .collect();
 
     let mut updated = 0usize;
@@ -160,15 +177,15 @@ pub(crate) fn fetch_and_store_provider_labels(
     };
     tag.provider_labels = snapshot;
     tag.updated_at = now_iso();
+    sync_stored_side_from_provider(tag);
     Ok(())
 }
 
 fn stored_side(tag: &ModTags) -> String {
-    normalize_side(if tag.side.is_empty() {
-        "universal"
-    } else {
-        tag.side.as_str()
-    })
+    if tag.side.is_empty() {
+        return UNKNOWN_SIDE.to_string();
+    }
+    normalize_side(tag.side.as_str())
 }
 
 pub(crate) fn link_modrinth_ids_for_curseforge_mods(
@@ -608,6 +625,7 @@ fn curseforge_loader_name(value: i64) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tags::{LabelOverridesStore, ModTags};
 
     #[test]
     fn maps_modrinth_client_only() {
@@ -708,6 +726,50 @@ mod tests {
         assert_eq!(store.client_side, "required");
         assert_eq!(store.server_side, "unsupported");
         assert_eq!(map_provider_side(&store).as_deref(), Some("client"));
+    }
+
+    #[test]
+    fn resolve_side_without_provider_labels_is_unknown() {
+        let tag = ModTags::default();
+        assert_eq!(resolve_side(&tag), UNKNOWN_SIDE);
+    }
+
+    #[test]
+    fn sync_stored_side_replaces_scan_default_universal_with_provider_client() {
+        let mut tag = ModTags {
+            side: "universal".to_string(),
+            ..Default::default()
+        };
+        tag.provider_labels = ProviderLabelsStore {
+            fetched_at: now_iso(),
+            client_side: "required".to_string(),
+            server_side: "unsupported".to_string(),
+            ..Default::default()
+        };
+        sync_stored_side_from_provider(&mut tag);
+        assert_eq!(tag.side, "client");
+        assert_eq!(resolve_side(&tag), "client");
+    }
+
+    #[test]
+    fn sync_stored_side_does_not_override_manual_side() {
+        let mut tag = ModTags {
+            side: "universal".to_string(),
+            label_overrides: LabelOverridesStore {
+                side_mode: "manual".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        tag.provider_labels = ProviderLabelsStore {
+            fetched_at: now_iso(),
+            client_side: "required".to_string(),
+            server_side: "unsupported".to_string(),
+            ..Default::default()
+        };
+        sync_stored_side_from_provider(&mut tag);
+        assert_eq!(tag.side, "universal");
+        assert_eq!(resolve_side(&tag), "universal");
     }
 
     #[test]

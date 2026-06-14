@@ -19,6 +19,7 @@ export function ServerSyncPathField({
   actionUi = null,
   onChange,
   onBlur,
+  onKeyDown,
   onAction,
   onCancel,
   onDismissPreview,
@@ -115,6 +116,7 @@ export function ServerSyncPathField({
             tabIndex={showOverlay ? -1 : undefined}
             onChange={onChange}
             onBlur={onBlur}
+            onKeyDown={onKeyDown}
             onFocus={onEditStart}
           />
           {showOverlay ? (

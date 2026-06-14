@@ -7,17 +7,16 @@ export function canRefreshProviderLabels(mod) {
 
 export function tagsForMode(mod, sideMode) {
   if (sideMode === 'manual') {
-    const side = mod?.manualSide ?? mod?.side ?? 'universal';
     return {
       sideMode: 'manual',
-      side: side === 'unknown' ? 'universal' : side,
+      side: mod?.manualSide ?? mod?.side ?? 'unknown',
       library: Boolean(mod?.manualLibrary),
       technical: Boolean(mod?.manualTechnical)
     };
   }
   return {
     sideMode: 'auto',
-    side: mod?.providerSide ?? 'universal',
+    side: mod?.providerSide ?? 'unknown',
     library: Boolean(mod?.providerLibrary),
     technical: Boolean(mod?.providerTechnical)
   };

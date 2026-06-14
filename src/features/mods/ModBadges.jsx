@@ -2,12 +2,12 @@ import { AlertTriangle, BookOpen, Wrench } from 'lucide-react';
 import { sideOptions, sourceIcons } from '../../lib/modMeta.jsx';
 
 export function TagMark({ mod }) {
-  const side = sideOptions.find((item) => item.id === mod.side) ?? sideOptions[1];
-  const SideIcon = side.icon;
+  const sideMeta = sideOptions.find((item) => item.id === mod.side);
+  const SideIcon = sideMeta?.icon;
 
   return (
-    <span className="tagMark" title={side.label}>
-      <SideIcon className={`tagIcon ${side.tone}`} size={17} />
+    <span className="tagMark" title={sideMeta?.label ?? 'Сторона не определена'}>
+      {SideIcon ? <SideIcon className={`tagIcon ${sideMeta.tone}`} size={17} /> : null}
       {mod.library ? <BookOpen className="tagIcon library" size={15} /> : null}
       {mod.technical ? <Wrench className="tagIcon technical" size={15} /> : null}
     </span>

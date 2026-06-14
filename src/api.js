@@ -52,9 +52,9 @@ export function checkModUpdates({ forceRefresh = false } = {}) {
   });
 }
 
-export function searchProviderCatalog({ source, query }) {
+export function searchProviderCatalog({ source, query, offset = 0 }) {
   return invoke('search_provider_catalog', {
-    request: { source, query }
+    request: { source, query, offset }
   });
 }
 
@@ -145,6 +145,14 @@ export function copyModFiles(keys) {
 
 export function deleteModFiles(keys) {
   return invoke('delete_mod_files', { keys });
+}
+
+export function disableModFiles(keys) {
+  return invoke('disable_mod_files', { keys });
+}
+
+export function enableModFiles(keys) {
+  return invoke('enable_mod_files', { keys });
 }
 
 export function uploadCover({ key, dataUrl }) {

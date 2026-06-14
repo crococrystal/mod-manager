@@ -184,6 +184,28 @@ pub(crate) fn list_modrinth_versions_limited(
     target: &InstanceTarget,
     limit: Option<u32>,
 ) -> Result<Vec<ProviderVersion>, String> {
+    let versions = fetch_modrinth_versions(client, project_id, target, limit)?;
+    let loader_filtered = target
+        .loader
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty());
+    if !versions.is_empty() || !loader_filtered {
+        return Ok(versions);
+    }
+    let fallback_target = InstanceTarget {
+        minecraft_version: target.minecraft_version.clone(),
+        loader: None,
+    };
+    fetch_modrinth_versions(client, project_id, &fallback_target, limit)
+}
+
+fn fetch_modrinth_versions(
+    client: &reqwest::blocking::Client,
+    project_id: &str,
+    target: &InstanceTarget,
+    limit: Option<u32>,
+) -> Result<Vec<ProviderVersion>, String> {
     let mut request = client.get(format!(
         "https://api.modrinth.com/v2/project/{project_id}/version"
     ));

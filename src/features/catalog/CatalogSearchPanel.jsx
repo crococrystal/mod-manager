@@ -4,6 +4,7 @@ import { ModCover } from '../mods/ModCover.jsx';
 import { sourceIcons, UpdatesCurrentState } from '../../lib/modMeta.jsx';
 import { useSelectedListDock } from '../../hooks/useSelectedListDock.js';
 import { useTableDragSelect } from '../../hooks/useTableDragSelect.js';
+import { useInfiniteScroll } from '../../hooks/useInfiniteScroll.js';
 import { resolveCatalogInstalledIndicator } from './catalogInstalledStatus.js';
 
 function CatalogInstalledBadge({ indicator }) {
@@ -53,6 +54,8 @@ export function CatalogSearchPanel({
   target,
   results,
   loading,
+  loadingMore = false,
+  hasMore = false,
   error,
   query,
   installedProjectIds,
@@ -66,7 +69,8 @@ export function CatalogSearchPanel({
   updatesBlocked = false,
   onSelect,
   onSelectDrag,
-  onContextMenu
+  onContextMenu,
+  onLoadMore
 }) {
   const isUpdates = source === 'updates';
   const providerLabel = isUpdates ? 'Обновления' : (sourceIcons[source]?.label ?? 'Каталог');
@@ -110,6 +114,17 @@ export function CatalogSearchPanel({
     topLimitSelector,
     scrollIntoViewKey: isUpdates ? selectedKey : null,
     deps: [results, selectedKey]
+  });
+
+  const infiniteEnabled = !isUpdates && Boolean(onLoadMore);
+  const sentinelRef = useInfiniteScroll({
+    enabled: infiniteEnabled,
+    rootRef: listRef,
+    hasMore,
+    loading,
+    loadingMore,
+    onLoadMore,
+    watchKey: results.length
   });
 
   if (isUpdates && updatesBlocked) {
@@ -201,33 +216,41 @@ export function CatalogSearchPanel({
             </table>
           </div>
         ) : (
-          <ul ref={listRef} className="catalogSearchList scrollArea">
-            {results.map((item) => {
-              const installedIndicator = resolveCatalogInstalledIndicator({
-                catalogSource: source,
-                item,
-                mods: installedMods,
-                installedProjectIds
-              });
-              const coverMod =
-                modForItem?.(item) ?? { coverUrl: item.iconUrl, displayName: item.title };
+          <div ref={listRef} className="tableWrap scrollArea">
+            <ul className="catalogSearchList">
+              {results.map((item) => {
+                const installedIndicator = resolveCatalogInstalledIndicator({
+                  catalogSource: source,
+                  item,
+                  mods: installedMods,
+                  installedProjectIds
+                });
+                const coverMod =
+                  modForItem?.(item) ?? { coverUrl: item.iconUrl, displayName: item.title };
 
-              return (
-                <li key={item.id}>
-                  <button type="button" className="catalogSearchRow" onClick={() => onSelect(item)}>
-                    <ModCover mod={coverMod} size="tile" />
-                    <span className="catalogSearchText">
-                      <span className="catalogSearchTitleLine">
-                        <strong>{item.title}</strong>
-                        <CatalogInstalledBadge indicator={installedIndicator} />
+                return (
+                  <li key={item.id}>
+                    <button type="button" className="catalogSearchRow" onClick={() => onSelect(item)}>
+                      <ModCover mod={coverMod} size="tile" />
+                      <span className="catalogSearchText">
+                        <span className="catalogSearchTitleLine">
+                          <strong>{item.title}</strong>
+                          <CatalogInstalledBadge indicator={installedIndicator} />
+                        </span>
+                        {item.summary ? <small>{item.summary}</small> : null}
                       </span>
-                      {item.summary ? <small>{item.summary}</small> : null}
-                    </span>
-                  </button>
+                    </button>
+                  </li>
+                );
+              })}
+              {loadingMore ? (
+                <li className="catalogSearchLoadingMore" aria-busy="true">
+                  <LoaderCircle className="spin" size={18} />
                 </li>
-              );
-            })}
-          </ul>
+              ) : null}
+              {hasMore ? <li ref={sentinelRef} className="catalogSearchSentinel" aria-hidden="true" /> : null}
+            </ul>
+          </div>
         )}
       </div>
       {isUpdates && selectedItem ? (

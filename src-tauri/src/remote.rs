@@ -653,14 +653,35 @@ fn modrinth_hit_to_project(hit: &serde_json::Value) -> Option<ProviderProject> {
     })
 }
 
-pub(crate) const CATALOG_SEARCH_LIMIT: usize = 25;
+pub(crate) const CATALOG_SEARCH_PAGE_SIZE: usize = 50;
+
+#[derive(Clone, Debug)]
+pub(crate) struct CatalogSearchPage {
+    pub candidates: Vec<ProviderCandidate>,
+    pub has_more: bool,
+    pub next_offset: u32,
+}
 
 pub(crate) fn search_catalog_modrinth(
     client: &reqwest::blocking::Client,
     query: &str,
     target: &InstanceTarget,
-) -> Vec<ProviderCandidate> {
-    fetch_modrinth_search_batch(client, query, CATALOG_SEARCH_LIMIT, Some(target))
+    offset: u32,
+) -> CatalogSearchPage {
+    let (candidates, has_more, next_offset) = fetch_modrinth_search_batch(
+        client,
+        query,
+        CATALOG_SEARCH_PAGE_SIZE,
+        offset,
+        Some(target),
+    );
+    let mut page = CatalogSearchPage {
+        candidates,
+        has_more,
+        next_offset,
+    };
+    finalize_catalog_search_page(client, "modrinth", None, query, target, offset, &mut page);
+    page
 }
 
 pub(crate) fn search_catalog_curseforge(
@@ -668,27 +689,143 @@ pub(crate) fn search_catalog_curseforge(
     api_key: &str,
     query: &str,
     target: &InstanceTarget,
-) -> Vec<ProviderCandidate> {
-    fetch_curseforge_search_batch(client, api_key, query, CATALOG_SEARCH_LIMIT, Some(target))
+    offset: u32,
+) -> CatalogSearchPage {
+    let (candidates, has_more, next_offset) = fetch_curseforge_search_batch(
+        client,
+        api_key,
+        query,
+        CATALOG_SEARCH_PAGE_SIZE,
+        offset,
+        Some(target),
+    );
+    let mut page = CatalogSearchPage {
+        candidates,
+        has_more,
+        next_offset,
+    };
+    finalize_catalog_search_page(
+        client,
+        "curseforge",
+        Some(api_key),
+        query,
+        target,
+        offset,
+        &mut page,
+    );
+    page
+}
+
+fn curseforge_candidate_from_item(item: &serde_json::Value) -> Option<ProviderCandidate> {
+    let id = item.get("id").and_then(|value| value.as_i64())?;
+    let title = item
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "Без названия".to_string());
+    let icon_url = item.get("logo").and_then(|logo| {
+        non_empty_json_string(logo.get("thumbnailUrl"))
+            .or_else(|| non_empty_json_string(logo.get("url")))
+    });
+    Some(ProviderCandidate {
+        id: id.to_string(),
+        slug: item
+            .get("slug")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        title,
+        summary: non_empty_json_string(item.get("summary")),
+        icon_url,
+        exact_file_match: false,
+        match_score: 0,
+    })
+}
+
+fn curseforge_catalog_slug_candidate(
+    client: &reqwest::blocking::Client,
+    api_key: &str,
+    slug: &str,
+    target: &InstanceTarget,
+) -> Option<ProviderCandidate> {
+    let target_suffix = curseforge_search_query_suffix(target);
+    let path = format!(
+        "mods/search?gameId=432&classId=6&slug={}&pageSize=1{target_suffix}",
+        urlencoding::encode(slug)
+    );
+    let payload = curseforge_get(client, api_key, &path)?;
+    payload
+        .get("data")
+        .and_then(|value| value.as_array())
+        .and_then(|items| items.first())
+        .and_then(|item| curseforge_candidate_from_item(item))
+}
+
+fn promote_catalog_candidate(page: &mut CatalogSearchPage, candidate: ProviderCandidate) {
+    page.candidates.retain(|existing| existing.id != candidate.id);
+    page.candidates.insert(0, candidate);
+}
+
+pub(crate) fn finalize_catalog_search_page(
+    client: &reqwest::blocking::Client,
+    source: &str,
+    api_key: Option<&str>,
+    query: &str,
+    target: &InstanceTarget,
+    offset: u32,
+    page: &mut CatalogSearchPage,
+) {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    sort_candidates_by_relevance(trimmed, &mut page.candidates);
+    if offset > 0 {
+        return;
+    }
+    if page
+        .candidates
+        .first()
+        .is_some_and(|candidate| candidate_exact_name_match(trimmed, candidate))
+    {
+        return;
+    }
+    let slug = slug_key(trimmed);
+    if slug.len() < 3 {
+        return;
+    }
+    let exact = match source {
+        "curseforge" => api_key.and_then(|key| {
+            curseforge_catalog_slug_candidate(client, key, &slug, target)
+        }),
+        "modrinth" => modrinth_candidate_for_project(client, &slug),
+        _ => None,
+    };
+    if let Some(candidate) = exact {
+        promote_catalog_candidate(page, candidate);
+    }
 }
 
 fn fetch_modrinth_search_batch(
     client: &reqwest::blocking::Client,
     query_text: &str,
     limit: usize,
+    offset: u32,
     target: Option<&InstanceTarget>,
-) -> Vec<ProviderCandidate> {
+) -> (Vec<ProviderCandidate>, bool, u32) {
     let trimmed = query_text.trim();
     let facets_raw = target
         .map(modrinth_search_facets_json)
         .unwrap_or_else(|| r#"[["project_type:mod"]]"#.to_string());
     let facets = urlencoding::encode(&facets_raw);
     let url = if trimmed.is_empty() {
-        format!("https://api.modrinth.com/v2/search?limit={limit}&index=downloads&facets={facets}")
+        format!(
+            "https://api.modrinth.com/v2/search?limit={limit}&offset={offset}&index=downloads&facets={facets}"
+        )
     } else {
         let query = urlencoding::encode(trimmed);
         format!(
-            "https://api.modrinth.com/v2/search?query={query}&limit={limit}&index=relevance&facets={facets}"
+            "https://api.modrinth.com/v2/search?query={query}&limit={limit}&offset={offset}&index=relevance&facets={facets}"
         )
     };
     let Ok(payload) = client
@@ -697,14 +834,19 @@ fn fetch_modrinth_search_batch(
         .and_then(|response| response.error_for_status())
         .and_then(|response| response.json::<serde_json::Value>())
     else {
-        return Vec::new();
+        return (Vec::new(), false, offset);
     };
     let hits = payload
         .get("hits")
         .and_then(|hits| hits.as_array())
         .cloned()
         .unwrap_or_default();
-    hits.iter()
+    let total_hits = payload
+        .get("total_hits")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let candidates: Vec<ProviderCandidate> = hits
+        .iter()
         .filter_map(|hit| {
             let project = modrinth_hit_to_project(hit)?;
             if project.project_type.as_deref() != Some("mod") {
@@ -723,7 +865,10 @@ fn fetch_modrinth_search_batch(
                 match_score: 0,
             })
         })
-        .collect()
+        .collect();
+    let has_more = offset as u64 + (candidates.len() as u64) < total_hits;
+    let next_offset = offset + candidates.len() as u32;
+    (candidates, has_more, next_offset)
 }
 
 pub(crate) fn list_modrinth_candidates(
@@ -733,8 +878,14 @@ pub(crate) fn list_modrinth_candidates(
     let mut seen = std::collections::HashSet::new();
     let mut candidates = Vec::new();
     for query_text in search_queries_for_api(display_name) {
-        for candidate in
-            fetch_modrinth_search_batch(client, &query_text, PROVIDER_SEARCH_FETCH_LIMIT, None)
+        for candidate in fetch_modrinth_search_batch(
+            client,
+            &query_text,
+            PROVIDER_SEARCH_FETCH_LIMIT,
+            0,
+            None,
+        )
+        .0
         {
             if seen.insert(candidate.id.clone()) {
                 candidates.push(candidate);
@@ -760,10 +911,11 @@ fn fetch_curseforge_search_batch(
     api_key: &str,
     query_text: &str,
     limit: usize,
+    offset: u32,
     target: Option<&InstanceTarget>,
-) -> Vec<ProviderCandidate> {
+) -> (Vec<ProviderCandidate>, bool, u32) {
     if api_key.trim().is_empty() {
-        return Vec::new();
+        return (Vec::new(), false, offset);
     }
     let trimmed = query_text.trim();
     let target_suffix = target
@@ -771,50 +923,42 @@ fn fetch_curseforge_search_batch(
         .unwrap_or_default();
     let path = if trimmed.is_empty() {
         format!(
-            "mods/search?gameId=432&classId=6&sortField=6&sortOrder=desc&pageSize={limit}{target_suffix}"
+            "mods/search?gameId=432&classId=6&sortField=6&sortOrder=desc&pageSize={limit}&index={offset}{target_suffix}"
         )
     } else {
         let query = urlencoding::encode(trimmed);
         format!(
-            "mods/search?gameId=432&classId=6&searchFilter={query}&pageSize={limit}{target_suffix}"
+            "mods/search?gameId=432&classId=6&searchFilter={query}&pageSize={limit}&index={offset}{target_suffix}"
         )
     };
     let Some(payload) = curseforge_get(client, api_key, &path) else {
-        return Vec::new();
+        return (Vec::new(), false, offset);
     };
     let items = payload
         .get("data")
         .and_then(|data| data.as_array())
         .cloned()
         .unwrap_or_default();
-    items
+    let pagination = payload.get("pagination");
+    let index = pagination
+        .and_then(|value| value.get("index"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(offset as u64);
+    let result_count = pagination
+        .and_then(|value| value.get("resultCount"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(items.len() as u64);
+    let total_count = pagination
+        .and_then(|value| value.get("totalCount"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(result_count);
+    let has_more = index + result_count < total_count;
+    let next_offset = (index + result_count) as u32;
+    let candidates = items
         .into_iter()
-        .filter_map(|item| {
-            let id = item.get("id").and_then(|value| value.as_i64())?;
-            let title = item
-                .get("name")
-                .and_then(|value| value.as_str())
-                .map(str::to_string)
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| "Без названия".to_string());
-            let icon_url = item.get("logo").and_then(|logo| {
-                non_empty_json_string(logo.get("thumbnailUrl"))
-                    .or_else(|| non_empty_json_string(logo.get("url")))
-            });
-            Some(ProviderCandidate {
-                id: id.to_string(),
-                slug: item
-                    .get("slug")
-                    .and_then(|value| value.as_str())
-                    .map(str::to_string),
-                title,
-                summary: non_empty_json_string(item.get("summary")),
-                icon_url,
-                exact_file_match: false,
-                match_score: 0,
-            })
-        })
-        .collect()
+        .filter_map(|item| curseforge_candidate_from_item(&item))
+        .collect();
+    (candidates, has_more, next_offset)
 }
 
 pub(crate) fn list_curseforge_candidates(
@@ -833,8 +977,11 @@ pub(crate) fn list_curseforge_candidates(
             api_key,
             &query_text,
             PROVIDER_SEARCH_FETCH_LIMIT,
+            0,
             None,
-        ) {
+        )
+        .0
+        {
             if seen.insert(candidate.id.clone()) {
                 candidates.push(candidate);
             }

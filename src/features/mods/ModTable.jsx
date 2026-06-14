@@ -18,7 +18,7 @@ function SortHeader({ id, children, sort, onSort }) {
 }
 
 function canChangeVersion(mod) {
-  return Boolean(
+  return !mod.disabled && Boolean(
     (mod.source === 'modrinth' && mod.modrinthId) ||
       (mod.source === 'curseforge' && mod.curseforgeId)
   );
@@ -114,7 +114,7 @@ function SelectedModDock({
       <table>
         <tbody>
           <tr
-            className="selected"
+            className={['selected', mod.disabled ? 'modRowDisabled' : ''].filter(Boolean).join(' ')}
             onClick={(event) => onSelect(mod, event)}
             onContextMenu={(event) => onContextMenu?.(mod, event)}
           >
@@ -198,11 +198,14 @@ export function ModTable({
           <tbody>
             {mods.map((mod) => {
               const active = selectedKeys?.has(mod.key);
+              const rowClass = [active ? 'selected' : '', mod.disabled ? 'modRowDisabled' : '']
+                .filter(Boolean)
+                .join(' ');
               return (
                 <tr
                   key={mod.filename}
                   data-filename={mod.filename}
-                  className={active ? 'selected' : ''}
+                  className={rowClass}
                   onMouseDown={(event) => handleRowMouseDown(mod, event)}
                   onMouseEnter={(event) => handleRowMouseEnter(mod, event)}
                   onClick={(event) => handleRowClick(mod, event, onSelect)}

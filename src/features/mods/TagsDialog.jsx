@@ -10,7 +10,7 @@ import { ModCover } from './ModCover.jsx';
 
 function currentTags(mod) {
   return {
-    side: mod.side === 'unknown' ? 'universal' : mod.side ?? 'universal',
+    side: mod.side ?? 'unknown',
     sideMode: mod.sideMode === 'manual' ? 'manual' : 'auto',
     library: Boolean(mod.library),
     technical: Boolean(mod.technical)

@@ -8,7 +8,17 @@ import {
   startServerControl,
   stopServerControl
 } from './serverControlApi.js';
+import { RconPanel } from './RconPanel.jsx';
 import { serverControlActionUi, serverControlToOverlayUi } from './serverControlUi.js';
+import {
+  bootElapsedSeconds,
+  isServerControlStatusFresh,
+  isServerBootInProgress,
+  readServerControlSession,
+  resetServerControlSession,
+  serverControlScopeKey,
+  writeServerControlSession
+} from './serverControlSessionStore.js';
 
 const EMPTY_SYNC_LANE = {
   syncing: false,
@@ -27,6 +37,7 @@ const JAVA_POLL_ATTEMPTS = 12;
 const READY_POLL_ATTEMPTS = 120;
 const POLL_INTERVAL_MS = 5000;
 const BOOT_POLL_INTERVAL_MS = 5000;
+const BOOT_TIMER_TICK_MS = 1000;
 
 function sleep(ms) {
   return new Promise((resolve) => {
@@ -55,7 +66,75 @@ export function ServerControlPanel({
   const [error, setError] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
   const [awaitingLaunch, setAwaitingLaunch] = useState(false);
+  const [bootTracking, setBootTracking] = useState(false);
+  const [bootElapsedSec, setBootElapsedSec] = useState(0);
   const launchPollRef = useRef(0);
+  const bootTimerStartRef = useRef(null);
+  const scopeKey = serverControlScopeKey(sshHost, serverRootPath);
+
+  const persistStatus = useCallback(
+    (patch) => {
+      writeServerControlSession(scopeKey, patch);
+    },
+    [scopeKey]
+  );
+
+  const beginBootTracking = useCallback(
+    (startedAt = Date.now()) => {
+      const session = readServerControlSession(scopeKey);
+      const nextStartedAt = session.bootStartedAt || startedAt;
+      bootTimerStartRef.current = nextStartedAt;
+      setBootTracking(true);
+      setAwaitingLaunch(true);
+      setBootElapsedSec(bootElapsedSeconds(nextStartedAt));
+      persistStatus({
+        bootTracking: true,
+        bootStartedAt: nextStartedAt
+      });
+    },
+    [persistStatus, scopeKey]
+  );
+
+  const endBootTracking = useCallback(() => {
+    setBootTracking(false);
+    setAwaitingLaunch(false);
+    bootTimerStartRef.current = null;
+    setBootElapsedSec(0);
+    persistStatus({
+      bootTracking: false,
+      bootStartedAt: 0
+    });
+  }, [persistStatus]);
+
+  useEffect(() => {
+    const session = readServerControlSession(scopeKey);
+    const tracking = isServerBootInProgress(session);
+    setChecked(session.checked);
+    setRunning(session.running);
+    setReady(session.ready);
+    setStatusMessage(session.statusMessage);
+    setError(session.error);
+    setBootTracking(tracking);
+    setAwaitingLaunch(tracking);
+    setChecking(false);
+    setStarting(false);
+    setStopping(false);
+    if (tracking && session.bootStartedAt) {
+      bootTimerStartRef.current = session.bootStartedAt;
+      setBootElapsedSec(bootElapsedSeconds(session.bootStartedAt));
+    } else {
+      bootTimerStartRef.current = null;
+      setBootElapsedSec(0);
+    }
+  }, [scopeKey]);
+
+  useEffect(() => {
+    persistStatus({ error });
+  }, [error, persistStatus]);
+
+  const booting = checked && running && !ready;
+  const bootWaiting = bootTracking && !running;
+  const showBootTimer = starting || awaitingLaunch || booting || bootTracking;
 
   useEffect(
     () => () => {
@@ -64,10 +143,36 @@ export function ServerControlPanel({
     []
   );
 
+  useEffect(() => {
+    if (!showBootTimer) {
+      return undefined;
+    }
+
+    if (bootTimerStartRef.current === null) {
+      bootTimerStartRef.current = Date.now();
+      persistStatus({ bootStartedAt: bootTimerStartRef.current, bootTracking: true });
+    }
+
+    const tick = () => {
+      const startedAt = bootTimerStartRef.current;
+      if (!startedAt) {
+        return;
+      }
+      setBootElapsedSec(
+        Math.max(1, Math.ceil((Date.now() - startedAt) / BOOT_TIMER_TICK_MS))
+      );
+    };
+
+    tick();
+    const intervalId = window.setInterval(tick, BOOT_TIMER_TICK_MS);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [persistStatus, showBootTimer]);
+
   const hasSsh = Boolean(sshHost?.trim());
   const hasServerRoot = Boolean(serverRootPath?.trim());
   const hasScript = Boolean(serverStartScript?.trim());
-  const booting = checked && running && !ready;
   const rowBusy = checking || starting || stopping || awaitingLaunch;
   const controlDisabled =
     disabled || rowBusy || actionBusy || !hasSsh || !hasServerRoot;
@@ -75,19 +180,59 @@ export function ServerControlPanel({
     disabled || actionBusy || !hasSsh || !hasServerRoot || !hasScript;
 
   const resetStatus = useCallback(() => {
-    setChecked(false);
-    setRunning(false);
-    setReady(false);
-    setStatusMessage('');
-    setError('');
-  }, []);
+    endBootTracking();
+    const session = resetServerControlSession(scopeKey);
+    setChecked(session.checked);
+    setRunning(session.running);
+    setReady(session.ready);
+    setStatusMessage(session.statusMessage);
+    setError(session.error);
+  }, [endBootTracking, scopeKey]);
 
-  const applyResult = useCallback((result) => {
-    setChecked(true);
-    setRunning(Boolean(result?.running));
-    setReady(Boolean(result?.ready));
-    setStatusMessage(result?.message ?? '');
-  }, []);
+  const applyResult = useCallback(
+    (result) => {
+      const checked = true;
+      const running = Boolean(result?.running);
+      const ready = Boolean(result?.ready);
+      const statusMessage = result?.message ?? '';
+      setChecked(checked);
+      setRunning(running);
+      setReady(ready);
+      setStatusMessage(statusMessage);
+      const bootPatch = ready
+        ? { bootTracking: false, bootStartedAt: 0 }
+        : running
+          ? {
+              bootTracking: true,
+              bootStartedAt:
+                readServerControlSession(scopeKey).bootStartedAt || Date.now()
+            }
+          : readServerControlSession(scopeKey).bootTracking
+            ? { bootTracking: true }
+            : {};
+      persistStatus({
+        checked,
+        running,
+        ready,
+        statusMessage,
+        cachedAt: Date.now(),
+        ...bootPatch
+      });
+      if (ready) {
+        setBootTracking(false);
+        setAwaitingLaunch(false);
+        bootTimerStartRef.current = null;
+        setBootElapsedSec(0);
+      } else if (running) {
+        const startedAt =
+          readServerControlSession(scopeKey).bootStartedAt || Date.now();
+        bootTimerStartRef.current = startedAt;
+        setBootTracking(true);
+        setBootElapsedSec(bootElapsedSeconds(startedAt));
+      }
+    },
+    [persistStatus, scopeKey]
+  );
 
   const checkStatus = useCallback(async () => {
     setChecking(true);
@@ -101,21 +246,58 @@ export function ServerControlPanel({
       if (result?.message && result?.ok === false) {
         setError(result.message);
       }
+      return result;
     } catch (err) {
       setChecked(false);
       setRunning(false);
       setReady(false);
       setStatusMessage('');
+      persistStatus({
+        checked: false,
+        running: false,
+        ready: false,
+        statusMessage: '',
+        cachedAt: 0,
+        bootTracking: false,
+        bootStartedAt: 0
+      });
+      endBootTracking();
       setError(String(err));
+      throw err;
     } finally {
       setChecking(false);
     }
-  }, [applyResult, serverRootPath, sshHost]);
+  }, [applyResult, endBootTracking, serverRootPath, sshHost]);
+
+  const ensureServerRunning = useCallback(async () => {
+    const session = readServerControlSession(scopeKey);
+    if (isServerBootInProgress(session)) {
+      return {
+        ok: true,
+        running: session.running,
+        ready: false,
+        message: session.statusMessage
+      };
+    }
+    if (isServerControlStatusFresh(session)) {
+      setChecked(session.checked);
+      setRunning(session.running);
+      setReady(session.ready);
+      setStatusMessage(session.statusMessage);
+      return {
+        ok: true,
+        running: session.running,
+        ready: session.ready,
+        message: session.statusMessage
+      };
+    }
+    return checkStatus();
+  }, [checkStatus, scopeKey]);
 
   const pollLaunchStatus = useCallback(async () => {
     const pollId = launchPollRef.current + 1;
     launchPollRef.current = pollId;
-    setAwaitingLaunch(true);
+    beginBootTracking();
     setError('');
 
     let hasJava = false;
@@ -137,7 +319,7 @@ export function ServerControlPanel({
           hasJava = true;
           applyResult(result);
           if (result?.ready) {
-            setAwaitingLaunch(false);
+            endBootTracking();
             return;
           }
           break;
@@ -145,12 +327,11 @@ export function ServerControlPanel({
         setChecked(true);
         setRunning(false);
         setReady(false);
-        setStatusMessage(`Запуск… ${attempt * 5} с, java пока нет`);
       } catch (err) {
         if (launchPollRef.current !== pollId) {
           return;
         }
-        setAwaitingLaunch(false);
+        endBootTracking();
         setError(String(err));
         return;
       }
@@ -161,7 +342,7 @@ export function ServerControlPanel({
     }
 
     if (!hasJava) {
-      setAwaitingLaunch(false);
+      endBootTracking();
       try {
         const result = await checkServerControlStatus({
           sshHost: sshHost?.trim() || undefined,
@@ -192,21 +373,20 @@ export function ServerControlPanel({
         }
         if (!result?.running) {
           applyResult(result);
-          setAwaitingLaunch(false);
+          endBootTracking();
           setError('Сервер остановился во время загрузки.');
           return;
         }
         applyResult(result);
         if (result?.ready) {
-          setAwaitingLaunch(false);
+          endBootTracking();
           return;
         }
-        setStatusMessage(`Сервер запускается… ${attempt * 5} с`);
       } catch (err) {
         if (launchPollRef.current !== pollId) {
           return;
         }
-        setAwaitingLaunch(false);
+        endBootTracking();
         setError(String(err));
         return;
       }
@@ -215,8 +395,22 @@ export function ServerControlPanel({
     if (launchPollRef.current !== pollId) {
       return;
     }
-    setAwaitingLaunch(false);
-  }, [applyResult, serverRootPath, sshHost]);
+    endBootTracking();
+  }, [applyResult, beginBootTracking, endBootTracking, serverRootPath, sshHost]);
+
+  useEffect(() => {
+    const session = readServerControlSession(scopeKey);
+    if (!isServerBootInProgress(session)) {
+      return undefined;
+    }
+    if (!sshHost?.trim() || !serverRootPath?.trim()) {
+      return undefined;
+    }
+    void pollLaunchStatus();
+    return undefined;
+    // Возобновляем опрос только при смене scope (повторное открытие настроек).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeKey]);
 
   useEffect(() => {
     if (!booting || rowBusy || !hasSsh || !hasServerRoot) {
@@ -234,7 +428,6 @@ export function ServerControlPanel({
 
   const startServer = useCallback(async () => {
     launchPollRef.current += 1;
-    setAwaitingLaunch(false);
     setStarting(true);
     setError('');
     try {
@@ -248,6 +441,7 @@ export function ServerControlPanel({
         return;
       }
       if (!result?.running || !result?.ready) {
+        beginBootTracking();
         void pollLaunchStatus();
       }
     } catch (err) {
@@ -255,15 +449,25 @@ export function ServerControlPanel({
       setRunning(false);
       setReady(false);
       setStatusMessage('');
+      persistStatus({
+        checked: false,
+        running: false,
+        ready: false,
+        statusMessage: '',
+        cachedAt: 0,
+        bootTracking: false,
+        bootStartedAt: 0
+      });
+      endBootTracking();
       setError(String(err));
     } finally {
       setStarting(false);
     }
-  }, [applyResult, pollLaunchStatus, serverRootPath, sshHost]);
+  }, [applyResult, beginBootTracking, endBootTracking, persistStatus, pollLaunchStatus, serverRootPath, sshHost]);
 
   const stopServer = useCallback(async () => {
     launchPollRef.current += 1;
-    setAwaitingLaunch(false);
+    endBootTracking();
     setStopping(true);
     setError('');
     try {
@@ -280,11 +484,21 @@ export function ServerControlPanel({
       setRunning(false);
       setReady(false);
       setStatusMessage('');
+      persistStatus({
+        checked: false,
+        running: false,
+        ready: false,
+        statusMessage: '',
+        cachedAt: 0,
+        bootTracking: false,
+        bootStartedAt: 0
+      });
+      endBootTracking();
       setError(String(err));
     } finally {
       setStopping(false);
     }
-  }, [applyResult, serverRootPath, sshHost]);
+  }, [applyResult, endBootTracking, persistStatus, serverRootPath, sshHost]);
 
   const handleAction = useCallback(() => {
     if (!checked) {
@@ -307,15 +521,17 @@ export function ServerControlPanel({
   });
 
   const previewUi = serverControlToOverlayUi({
-    checking: checking || (awaitingLaunch && !running),
-    starting,
+    checking: checking || bootWaiting,
+    starting: starting || bootWaiting || booting,
     stopping,
-    awaitingLaunch,
+    awaitingLaunch: awaitingLaunch || bootTracking,
     checked,
     running,
     ready,
     error,
-    message: statusMessage
+    message: statusMessage,
+    showBootTimer,
+    bootElapsedSec
   });
 
   return (
@@ -336,6 +552,16 @@ export function ServerControlPanel({
         onAction={handleAction}
         onDismissPreview={resetStatus}
         onEditStart={resetStatus}
+      />
+
+      <RconPanel
+        sshHost={sshHost}
+        serverRootPath={serverRootPath}
+        disabled={disabled}
+        actionBusy={actionBusy || rowBusy}
+        inputDisabled={inputDisabled}
+        serverRunning={running}
+        ensureServerRunning={ensureServerRunning}
       />
 
       <div className="field serverControlStartSettings">

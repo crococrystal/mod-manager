@@ -100,6 +100,8 @@ pub fn run() {
             server_control::stop_server_control,
             server_control::read_server_launch_script,
             server_control::write_server_launch_script,
+            server_control::check_server_rcon,
+            server_control::send_server_rcon_command,
             commands::check_mod_updates,
             commands::search_provider_catalog,
             commands::preview_catalog_install,
@@ -107,6 +109,8 @@ pub fn run() {
             commands::install_from_catalog,
             commands::copy_mod_files,
             commands::delete_mod_files,
+            commands::disable_mod_files,
+            commands::enable_mod_files,
             commands::upload_cover,
             commands::delete_custom_cover,
             commands::refresh_window_shadow

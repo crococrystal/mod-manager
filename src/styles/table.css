@@ -58,6 +58,29 @@ tbody tr.selected {
   background: #2a3b3c;
 }
 
+tbody tr.modRowDisabled {
+  color: #7d868c;
+}
+
+tbody tr.modRowDisabled strong {
+  color: inherit;
+  font-weight: 500;
+}
+
+tbody tr.modRowDisabled .descriptionCell,
+tbody tr.modRowDisabled .descriptionCell button,
+tbody tr.modRowDisabled .versionCell button {
+  color: inherit;
+}
+
+tbody tr.modRowDisabled:hover {
+  background: #23282b;
+}
+
+tbody tr.modRowDisabled.selected {
+  background: #283436;
+}
+
 th:nth-child(1),
 td:nth-child(1) {
   width: 86px;

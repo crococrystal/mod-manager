@@ -66,13 +66,6 @@ pub(crate) fn filter_versions_for_mc(all: &[String], minecraft_version: &str) ->
         .collect()
 }
 
-pub(crate) fn latest_version(versions: &[String]) -> Option<String> {
-    versions
-        .iter()
-        .max_by(|left, right| compare_versions(left, right))
-        .cloned()
-}
-
 pub(crate) fn installer_url(version: &str) -> String {
     format!(
         "https://maven.neoforged.net/releases/net/neoforged/neoforge/{version}/neoforge-{version}-installer.jar"
@@ -106,20 +99,6 @@ pub(crate) fn fetch_versions_for_mc(
     }
     filtered.sort_by(|left, right| compare_versions(left, right));
     Ok(filtered)
-}
-
-pub(crate) fn fetch_latest_for_mc(
-    client: &reqwest::blocking::Client,
-    minecraft_version: &str,
-) -> Result<String, String> {
-    fetch_versions_for_mc(client, minecraft_version)?
-        .into_iter()
-        .max_by(|left, right| compare_versions(left, right))
-        .ok_or_else(|| {
-            format!(
-                "Не найдены версии NeoForge для Minecraft {minecraft_version}."
-            )
-        })
 }
 
 pub(crate) fn versions_newest_first(versions: &[String]) -> Vec<String> {

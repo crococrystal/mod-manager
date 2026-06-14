@@ -15,6 +15,7 @@ use crate::instance_meta::{
 };
 use crate::mod_names::normalized_match_key;
 use crate::mods::{scan_mods_for_settings, stable_key, ModEntry};
+use crate::provider_labels::fetch_and_store_provider_labels;
 use crate::mods_watch;
 use crate::remote::{
     curseforge_get, curseforge_mod_info, fetch_catalog_project_description, http_client,
@@ -43,6 +44,8 @@ fn project_details_cache_fresh(details: &CatalogProjectDetails) -> bool {
 pub(crate) struct CatalogSearchRequest {
     pub source: String,
     pub query: String,
+    #[serde(default)]
+    pub offset: u32,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -50,6 +53,8 @@ pub(crate) struct CatalogSearchRequest {
 pub(crate) struct CatalogSearchResponse {
     pub target: InstanceTarget,
     pub candidates: Vec<ProviderCandidate>,
+    pub has_more: bool,
+    pub next_offset: u32,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -201,17 +206,28 @@ fn search_catalog_blocking(
     let target = detect_instance_target(&paths);
 
     let client = http_client().ok_or_else(|| "Не удалось создать HTTP-клиент.".to_string())?;
-    let candidates = match source.as_str() {
-        "modrinth" => search_catalog_modrinth(&client, query, &target),
+    let page = match source.as_str() {
+        "modrinth" => search_catalog_modrinth(&client, query, &target, request.offset),
         "curseforge" => {
             if settings.curseforge_api_key.trim().is_empty() {
                 return Err("Для поиска на CurseForge нужен API key.".to_string());
             }
-            search_catalog_curseforge(&client, &settings.curseforge_api_key, query, &target)
+            search_catalog_curseforge(
+                &client,
+                &settings.curseforge_api_key,
+                query,
+                &target,
+                request.offset,
+            )
         }
         _ => unreachable!(),
     };
-    Ok(CatalogSearchResponse { target, candidates })
+    Ok(CatalogSearchResponse {
+        target,
+        candidates: page.candidates,
+        has_more: page.has_more,
+        next_offset: page.next_offset,
+    })
 }
 
 fn catalog_project_details_blocking(
@@ -296,6 +312,7 @@ fn preview_catalog_install_blocking(
         &target,
         0,
         &mut visiting,
+        Some(title.as_str()),
     )?;
     visiting.clear();
 
@@ -360,6 +377,7 @@ fn install_from_catalog_blocking(
         &target,
         0,
         &mut visiting,
+        None,
     )?;
     visiting.clear();
 
@@ -381,27 +399,76 @@ fn install_from_catalog_blocking(
 
     mods_watch::suppress_events_for(Duration::from_secs(120));
     let install_dir = paths.install_mods_dir();
-    let mut installed_keys = Vec::new();
 
     for item in &plan {
+        if !is_installable_catalog_artifact(&item.version.filename) {
+            continue;
+        }
         if paths.resolve_mod_jar(&item.version.filename).is_some() {
             let key = installed_key_for_project(&mods, &item.source, &item.project_id)
-                .unwrap_or_else(|| stable_key(&item.version.filename, None));
+                .unwrap_or_else(|| stable_key_for_item(item));
             write_catalog_tag(&paths, &key, item)?;
-            if !installed_keys.contains(&key) {
-                installed_keys.push(key);
-            }
             continue;
         }
         install_item_jar(&client, &settings, &install_dir, item)?;
         let key = stable_key_for_item(item);
         write_catalog_tag(&paths, &key, item)?;
-        installed_keys.push(key);
     }
     mods_watch::suppress_events_for(Duration::from_secs(4));
 
+    let catalog_root = catalog::catalog_root(app).ok();
+    let mods = scan_mods_for_settings(&settings, catalog_root)?;
+    let mut installed_keys = Vec::new();
+    for item in &plan {
+        if !is_installable_catalog_artifact(&item.version.filename) {
+            continue;
+        }
+        let filename = item.version.filename.trim();
+        if filename.is_empty() {
+            continue;
+        }
+        let key = mods
+            .iter()
+            .find(|entry| entry.filename == filename)
+            .map(|entry| entry.key.clone())
+            .unwrap_or_else(|| stable_key_for_item(item));
+        if !installed_keys.contains(&key) {
+            installed_keys.push(key);
+        }
+    }
+
+    let mut tags = read_tags(&paths.tags_path)?;
+    let mut labels_changed = false;
+    for key in &installed_keys {
+        let Some(item) = mods.iter().find(|entry| entry.key == *key) else {
+            continue;
+        };
+        let labels_missing = tags
+            .mods
+            .get(key)
+            .map(|tag| tag.provider_labels.fetched_at.is_empty())
+            .unwrap_or(true);
+        if !labels_missing {
+            continue;
+        }
+        let tag = tags.mods.entry(key.clone()).or_default();
+        if fetch_and_store_provider_labels(tag, item, &settings).is_ok() {
+            labels_changed = true;
+        }
+    }
+    if labels_changed {
+        tags.updated_at = now_iso();
+        write_tags(&paths.tags_path, &tags)?;
+    }
+
+    let main_key = mods
+        .iter()
+        .find(|entry| entry.filename == main.version.filename)
+        .map(|entry| entry.key.clone())
+        .unwrap_or_else(|| stable_key_for_item(&main));
+
     Ok(CatalogInstallResult {
-        main_key: stable_key_for_item(&main),
+        main_key,
         installed_keys,
     })
 }
@@ -424,11 +491,18 @@ fn collect_pending_installs(
         if !planned.insert(dep_id.clone()) {
             continue;
         }
+        if !is_installable_catalog_project(client, settings, source, &dep_id) {
+            continue;
+        }
         let (title, slug, _) = project_meta(client, settings, source, &dep_id)
             .unwrap_or_else(|_| ("Зависимость".to_string(), None, None));
         let dep_item = resolve_install_item(
             client, settings, source, &dep_id, slug, None, target, 0, visiting,
+            Some(title.as_str()),
         )?;
+        if !is_installable_catalog_artifact(&dep_item.version.filename) {
+            continue;
+        }
         if installed_key_for_dependency(
             mods,
             source,
@@ -467,12 +541,19 @@ fn build_dependency_preview(
         if !listed.insert(dep_id.clone()) {
             continue;
         }
+        if !is_installable_catalog_project(client, settings, source, &dep_id) {
+            continue;
+        }
         let title = project_meta(client, settings, source, &dep_id)
             .map(|meta| meta.0)
             .unwrap_or_else(|_| "Зависимость".to_string());
         let dep_item = resolve_install_item(
             client, settings, source, &dep_id, None, None, target, 0, visiting,
+            Some(title.as_str()),
         )?;
+        if !is_installable_catalog_artifact(&dep_item.version.filename) {
+            continue;
+        }
         if let Some(key) = installed_key_for_dependency(
             mods,
             source,
@@ -534,6 +615,7 @@ fn resolve_install_item(
     target: &InstanceTarget,
     depth: usize,
     visiting: &mut HashSet<String>,
+    project_title: Option<&str>,
 ) -> Result<ResolvedInstallItem, String> {
     if depth > MAX_DEPENDENCY_DEPTH {
         return Err("Слишком глубокая цепочка зависимостей.".to_string());
@@ -549,7 +631,14 @@ fn resolve_install_item(
     let version = if let Some(version_id) = version_id.and_then(clean_string) {
         version_by_id(client, settings, source, project_id, &version_id)?
     } else {
-        pick_best_version(client, settings, source, project_id, target)?
+        pick_best_version(
+            client,
+            settings,
+            source,
+            project_id,
+            target,
+            project_title,
+        )?
     };
     visiting.remove(project_id);
 
@@ -561,12 +650,23 @@ fn resolve_install_item(
     })
 }
 
+fn format_target_label(target: &InstanceTarget) -> String {
+    [target.minecraft_version.as_deref(), target.loader.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 fn pick_best_version(
     client: &reqwest::blocking::Client,
     settings: &Settings,
     source: &str,
     project_id: &str,
     target: &InstanceTarget,
+    project_title: Option<&str>,
 ) -> Result<ProviderVersion, String> {
     let mut versions = match source {
         "modrinth" => list_modrinth_versions(client, project_id, target)?,
@@ -579,10 +679,18 @@ fn pick_best_version(
         });
     }
     versions.sort_by(|left, right| right.date_published.cmp(&left.date_published));
-    versions
-        .into_iter()
-        .next()
-        .ok_or_else(|| "Нет версии под текущую сборку.".to_string())
+    versions.into_iter().next().ok_or_else(|| {
+        let target_label = format_target_label(target);
+        let target_suffix = if target_label.is_empty() {
+            "текущую сборку".to_string()
+        } else {
+            format!("сборку {target_label}")
+        };
+        match project_title {
+            Some(title) => format!("Нет версии «{title}» под {target_suffix}."),
+            None => format!("Нет версии проекта {project_id} под {target_suffix}."),
+        }
+    })
 }
 
 fn version_by_id(
@@ -891,10 +999,39 @@ fn sanitize_download_filename(filename: &str) -> Result<String, String> {
     if path.file_name().and_then(|value| value.to_str()) != Some(trimmed) {
         return Err("Поставщик вернул небезопасное имя файла.".to_string());
     }
-    if path.extension().and_then(|value| value.to_str()) != Some("jar") {
+    if !is_installable_catalog_artifact(trimmed) {
         return Err("Можно устанавливать только jar-файлы модов.".to_string());
     }
     Ok(trimmed.to_string())
+}
+
+fn is_installable_catalog_artifact(filename: &str) -> bool {
+    Path::new(filename.trim())
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("jar"))
+}
+
+fn is_installable_modrinth_project(payload: &serde_json::Value) -> bool {
+    matches!(
+        payload.get("project_type").and_then(|value| value.as_str()),
+        Some("mod")
+    )
+}
+
+fn is_installable_catalog_project(
+    client: &reqwest::blocking::Client,
+    settings: &Settings,
+    source: &str,
+    project_id: &str,
+) -> bool {
+    match source {
+        "modrinth" => modrinth_project(client, project_id)
+            .map(|payload| is_installable_modrinth_project(&payload))
+            .unwrap_or(false),
+        "curseforge" => curseforge_mod_info(client, &settings.curseforge_api_key, project_id).is_some(),
+        _ => false,
+    }
 }
 
 fn timestamp_millis() -> u128 {
@@ -924,5 +1061,19 @@ mod tests {
             curseforge_required_mod_ids(&payload),
             vec!["238222".to_string(), "890303".to_string()]
         );
+    }
+
+    #[test]
+    fn installable_catalog_artifact_accepts_only_jar() {
+        assert!(is_installable_catalog_artifact("mod-1.0.jar"));
+        assert!(!is_installable_catalog_artifact("FA+Player-v1.1.zip"));
+    }
+
+    #[test]
+    fn installable_modrinth_project_accepts_mod_only() {
+        let payload = serde_json::json!({ "project_type": "mod" });
+        assert!(is_installable_modrinth_project(&payload));
+        let payload = serde_json::json!({ "project_type": "resourcepack" });
+        assert!(!is_installable_modrinth_project(&payload));
     }
 }

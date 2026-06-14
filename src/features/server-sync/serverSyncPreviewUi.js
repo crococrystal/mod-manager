@@ -39,7 +39,7 @@ export function buildPreviewParts(preview) {
     updatePairs: preview.toUpdatePairs ?? [],
     deleteFiles: preview.toDeleteItems?.length
       ? preview.toDeleteItems
-      : (preview.toDeleteNames ?? []).map((filename) => ({ filename, side: 'universal' })),
+      : (preview.toDeleteNames ?? []).map((filename) => ({ filename, side: '' })),
     matches: upToDate ? 'Папка соответствует' : null,
     upToDate
   };

@@ -21,7 +21,7 @@ export function ServerSyncPreviewDeleteStat({
       <ul className="serverSyncPreviewFileList" style={previewFileListStyle(files.length)}>
         {files.map((item, index) => {
           const filename = typeof item === 'string' ? item : item.filename;
-          const side = typeof item === 'string' ? 'universal' : item.side;
+          const side = typeof item === 'string' ? '' : item.side ?? '';
 
           return (
             <ServerSyncPreviewFileRow
@@ -29,7 +29,7 @@ export function ServerSyncPreviewDeleteStat({
               index={index}
               total={files.length}
               variant="delete"
-              marker={<ServerSyncPreviewModSideTag side={side} />}
+              marker={side ? <ServerSyncPreviewModSideTag side={side} /> : null}
             >
               <span className="serverSyncPreviewFileName">{filename}</span>
             </ServerSyncPreviewFileRow>

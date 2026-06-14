@@ -38,6 +38,9 @@ pub(crate) fn ensure_ssh_host(host: &str) -> Result<(), String> {
 
 pub(crate) fn explain_ssh_error(host: &str, detail: &str) -> String {
     let text = detail.strip_prefix("ssh: ").unwrap_or(detail).trim();
+    if text.contains("#< CLIXML") || text.contains("<Objs Version=") {
+        return "Служебный вывод PowerShell (не ошибка сервера).".to_string();
+    }
     if text.contains("Could not resolve hostname") || text.contains("nodename nor servname") {
         return format!("«{host}» не в ~/.ssh/config.");
     }
@@ -54,10 +57,17 @@ pub(crate) fn explain_ssh_error(host: &str, detail: &str) -> String {
 }
 
 pub(crate) fn ssh_command_failed(host: &str, output: &Output) -> String {
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let raw_stderr = String::from_utf8_lossy(&output.stderr);
+    let raw_stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = crate::server_control::readiness::clean_powershell_stdout(&raw_stderr);
+    let stdout = crate::server_control::readiness::clean_powershell_stdout(&raw_stdout);
     let detail = if !stderr.is_empty() { stderr } else { stdout };
     if detail.is_empty() {
+        if crate::server_control::readiness::contains_clixml(&raw_stderr)
+            || crate::server_control::readiness::contains_clixml(&raw_stdout)
+        {
+            return crate::server_control::readiness::clixml_noise_message().to_string();
+        }
         let code = output.status.code().unwrap_or(-1);
         return format!("Удалённая команда завершилась с кодом {code}.");
     }

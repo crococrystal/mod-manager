@@ -41,6 +41,17 @@ pub(crate) fn loader_matches(candidate: &str, target: &str) -> bool {
     candidate.trim().eq_ignore_ascii_case(target.trim())
 }
 
+/// Modrinth resource packs expose loader `minecraft` instead of forge/neoforge/fabric.
+pub(crate) fn version_loader_matches_target(version_loaders: &[String], target_loader: &str) -> bool {
+    if version_loaders
+        .iter()
+        .any(|loader| loader_matches(loader, target_loader))
+    {
+        return true;
+    }
+    version_loaders.len() == 1 && version_loaders[0].eq_ignore_ascii_case("minecraft")
+}
+
 pub(crate) fn version_matches_target(
     game_versions: &[String],
     loaders: &[String],
@@ -65,7 +76,7 @@ pub(crate) fn version_matches_target(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        if !loaders.iter().any(|value| loader_matches(value, loader)) {
+        if !version_loader_matches_target(loaders, loader) {
             return false;
         }
     }
@@ -307,6 +318,11 @@ mod tests {
         assert!(!version_matches_target(
             &["1.21".to_string()],
             &["neoforge".to_string()],
+            &target
+        ));
+        assert!(version_matches_target(
+            &["1.21.1".to_string()],
+            &["minecraft".to_string()],
             &target
         ));
     }

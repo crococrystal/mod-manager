@@ -3348,6 +3348,16 @@ dd {
   gap: 12px;
 }
 
+.rconSection {
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.rconSection--nested {
+  padding-top: 0;
+  border-top: none;
+}
+
 .serverControlStartSettings {
   display: grid;
   gap: 10px;
@@ -3403,18 +3413,24 @@ dd {
 
 .loaderUpdateFieldHeader {
   display: grid;
-  grid-template-columns: var(--sync-label-width) minmax(0, 1fr) var(--sync-action-size);
+  grid-template-columns: minmax(0, 1fr) var(--sync-action-size);
   gap: var(--sync-action-gap);
   align-items: center;
   height: var(--sync-row-height);
 }
 
+.settingsMinimal .loaderUpdateFieldHeader {
+  display: grid;
+}
+
 .loaderUpdateLogo {
   grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
   display: block;
-  width: var(--sync-label-width);
+  width: auto;
   height: var(--sync-row-height);
-  max-width: var(--sync-label-width);
+  max-width: 184px;
   flex-shrink: 0;
   object-fit: contain;
   object-position: left center;
@@ -3423,10 +3439,12 @@ dd {
 }
 
 .loaderUpdateVersionSelect {
-  grid-column: 2;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  justify-self: end;
   min-width: 0;
-  width: 100%;
-  max-width: none;
+  width: auto;
+  max-width: 220px;
   height: var(--sync-row-height);
   padding: 0 28px 0 10px;
   border-radius: 6px;

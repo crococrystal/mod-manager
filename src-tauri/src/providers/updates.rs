@@ -550,7 +550,7 @@ mod tests {
             display_name: "Mod".to_string(),
             display_name_locked: false,
             installed_version: Some("1.0.0".to_string()),
-            side: "universal".to_string(),
+            side: crate::mods::UNKNOWN_SIDE.to_string(),
             library: false,
             technical: false,
             description: String::new(),
@@ -581,6 +581,7 @@ mod tests {
             provider_side: String::new(),
             provider_library: false,
             provider_technical: false,
+            disabled: false,
         }
     }
 

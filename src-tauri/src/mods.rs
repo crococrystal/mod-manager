@@ -69,6 +69,8 @@ pub(crate) struct ModEntry {
     pub provider_side: String,
     pub provider_library: bool,
     pub provider_technical: bool,
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 impl ModEntry {
@@ -86,7 +88,7 @@ impl ModEntry {
             display_name: String::new(),
             display_name_locked: false,
             installed_version: None,
-            side: "universal".to_string(),
+            side: UNKNOWN_SIDE.to_string(),
             library: false,
             technical: false,
             description: String::new(),
@@ -109,12 +111,13 @@ impl ModEntry {
             duplicate: false,
             modified_at: String::new(),
             side_mode: "auto".to_string(),
-            manual_side: "universal".to_string(),
+            manual_side: UNKNOWN_SIDE.to_string(),
             manual_library: false,
             manual_technical: false,
-            provider_side: "universal".to_string(),
+            provider_side: UNKNOWN_SIDE.to_string(),
             provider_library: false,
             provider_technical: false,
+            disabled: false,
         }
     }
 }
@@ -231,13 +234,38 @@ pub(crate) fn stable_key(filename: &str, info: Option<&IndexInfo>) -> String {
     format!("manual:{}", slug_from_filename(filename))
 }
 
+pub(crate) const UNKNOWN_SIDE: &str = "unknown";
+
+pub(crate) fn parse_mod_disk_filename(name: &str) -> Option<(String, bool)> {
+    if name.ends_with(".jar.disable") {
+        let jar_name = name.strip_suffix(".disable")?.to_string();
+        if jar_name.ends_with(".jar") {
+            return Some((jar_name, true));
+        }
+        return None;
+    }
+    if name.ends_with(".jar") {
+        return Some((name.to_string(), false));
+    }
+    None
+}
+
+pub(crate) fn disabled_mod_disk_filename(filename: &str) -> String {
+    format!("{filename}.disable")
+}
+
 pub(crate) fn normalize_side(side: &str) -> String {
-    match side {
+    match side.trim().to_ascii_lowercase().as_str() {
         "client" => "client".to_string(),
         "server" => "server".to_string(),
         "universal" | "both" => "universal".to_string(),
-        _ => "universal".to_string(),
+        "unknown" | "" => UNKNOWN_SIDE.to_string(),
+        _ => UNKNOWN_SIDE.to_string(),
     }
+}
+
+pub(crate) fn side_runs_on_server(side: &str) -> bool {
+    matches!(side, "server" | "universal")
 }
 
 fn clean_tag_value(value: &str) -> Option<String> {
@@ -348,41 +376,60 @@ pub(crate) fn scan_mods_for_settings(
     let mut tags = read_tags(&paths.tags_path)?;
     let alias_keys = alias_keys_by_filename(&tags);
     let mut changed = false;
-    let mut jars_by_filename: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let mut jars_by_filename: HashMap<String, Vec<(PathBuf, bool)>> = HashMap::new();
 
     for mods_dir in paths.all_mods_dirs() {
         let entries = fs::read_dir(mods_dir).map_err(|error| error.to_string())?;
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("jar") {
-                continue;
-            }
             let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
             if filename.starts_with(".mod-manager-download-") {
                 continue;
             }
+            let Some((jar_filename, disabled)) = parse_mod_disk_filename(filename) else {
+                continue;
+            };
             jars_by_filename
-                .entry(filename.to_string())
+                .entry(jar_filename)
                 .or_default()
-                .push(path);
+                .push((path, disabled));
         }
     }
 
-    let mut jars: Vec<(String, PathBuf, bool)> = Vec::with_capacity(jars_by_filename.len());
+    let mut jars: Vec<(String, PathBuf, bool, bool)> = Vec::with_capacity(jars_by_filename.len());
     for (filename, candidates) in jars_by_filename {
         let duplicate = candidates.len() > 1;
-        let Some(path) = select_canonical_mod_jar(&paths, &filename, &candidates) else {
-            continue;
+        let active: Vec<PathBuf> = candidates
+            .iter()
+            .filter(|(_, disabled)| !disabled)
+            .map(|(path, _)| path.clone())
+            .collect();
+        let disabled_only: Vec<PathBuf> = candidates
+            .iter()
+            .filter(|(_, disabled)| *disabled)
+            .map(|(path, _)| path.clone())
+            .collect();
+        let (path, disabled) = if !active.is_empty() {
+            let Some(path) = select_canonical_mod_jar(&paths, &filename, &active) else {
+                continue;
+            };
+            (path, false)
+        } else {
+            let disabled_filename = disabled_mod_disk_filename(&filename);
+            let Some(path) = select_canonical_mod_jar(&paths, &disabled_filename, &disabled_only) else {
+                continue;
+            };
+            (path, true)
         };
-        jars.push((filename, path, duplicate));
+        jars.push((filename, path, duplicate, disabled));
     }
 
     jars.sort_by(|left, right| left.0.cmp(&right.0));
     let mut mods = Vec::with_capacity(jars.len());
 
-    for (filename, path, duplicate) in jars {
+    for (filename, path, duplicate, disabled) in jars {
         let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
         let info = index.get(&filename);
         let key = key_for_file(&filename, info, &alias_keys);
@@ -403,7 +450,7 @@ pub(crate) fn scan_mods_for_settings(
                     side: info
                         .and_then(|info| info.side.as_deref())
                         .map(normalize_side)
-                        .unwrap_or_else(|| "universal".to_string()),
+                        .unwrap_or_default(),
                     aliases: vec![filename.clone()],
                     source: default_source.to_string(),
                     updated_at: now_iso(),
@@ -505,6 +552,7 @@ pub(crate) fn scan_mods_for_settings(
             provider_side,
             provider_library,
             provider_technical,
+            disabled,
         });
     }
 
