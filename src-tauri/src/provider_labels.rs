@@ -296,6 +296,10 @@ pub(crate) fn build_curseforge_labels(
     if client_side.is_empty() && server_side.is_empty() {
         client_side = "optional".to_string();
         server_side = "optional".to_string();
+    } else if client_side == "required" && server_side.is_empty() {
+        server_side = "unsupported".to_string();
+    } else if server_side == "required" && client_side.is_empty() {
+        client_side = "unsupported".to_string();
     }
 
     Some(ProviderLabelsStore {
@@ -335,8 +339,8 @@ fn map_provider_side(store: &ProviderLabelsStore) -> Option<String> {
     let client = store.client_side.as_str();
     let server = store.server_side.as_str();
     let side = match (client, server) {
-        ("required", "unsupported") => "client",
-        ("unsupported", "required") => "server",
+        ("required", "unsupported") | ("required", "") => "client",
+        ("unsupported", "required") | ("", "required") => "server",
         ("required", "required")
         | ("optional", "optional")
         | ("required", "optional")
@@ -424,5 +428,35 @@ mod tests {
             ..Default::default()
         };
         assert!(map_provider_technical(&store));
+    }
+
+    #[test]
+    fn maps_curseforge_client_only_from_game_versions() {
+        let project = serde_json::json!({ "data": { "categories": [] } });
+        let file = serde_json::json!({
+            "data": {
+                "id": 6662069,
+                "gameVersions": ["1.21", "Client", "NeoForge", "1.21.1"]
+            }
+        });
+        let store = build_curseforge_labels(&project, Some(&file)).expect("labels");
+        assert_eq!(store.client_side, "required");
+        assert_eq!(store.server_side, "unsupported");
+        assert_eq!(map_provider_side(&store).as_deref(), Some("client"));
+    }
+
+    #[test]
+    fn maps_curseforge_server_only_from_game_versions() {
+        let project = serde_json::json!({ "data": { "categories": [] } });
+        let file = serde_json::json!({
+            "data": {
+                "id": 1,
+                "gameVersions": ["1.21", "Server", "NeoForge"]
+            }
+        });
+        let store = build_curseforge_labels(&project, Some(&file)).expect("labels");
+        assert_eq!(store.client_side, "unsupported");
+        assert_eq!(store.server_side, "required");
+        assert_eq!(map_provider_side(&store).as_deref(), Some("server"));
     }
 }

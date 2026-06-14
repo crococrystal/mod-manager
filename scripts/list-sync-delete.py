@@ -11,7 +11,6 @@ INSTANCE = Path(
 )
 REMOTE_SERVER = "C:/Users/Admin/Desktop/Crystal Tech 1.21.1/mods"
 REMOTE_DIST = "C:/Users/Admin/Desktop/Crystal Tech 1.21.1/automodpack/host-modpack/main/mods"
-OUT = Path(__file__).resolve().parents[1] / "sync-delete-report.json"
 
 
 def remote_jars(remote_dir: str) -> dict[str, int]:
@@ -155,8 +154,6 @@ def main() -> int:
             lane("server", REMOTE_SERVER, server_allowed),
         ],
     }
-    OUT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(str(OUT))
     for lane_data in report["lanes"]:
         print(
             f"{lane_data['lane']}: delete={lane_data['counts']['delete']} "

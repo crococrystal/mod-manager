@@ -14,7 +14,6 @@ INSTANCE = Path(
 )
 REMOTE_SERVER = "C:/Users/Admin/Desktop/Crystal Tech 1.21.1/mods"
 REMOTE_DIST = "C:/Users/Admin/Desktop/Crystal Tech 1.21.1/automodpack/host-modpack/main/mods"
-OUT = Path(__file__).resolve().parents[1] / "sync-compare-report.json"
 
 
 def local_jars(*dirs: Path) -> dict[str, int]:
@@ -137,8 +136,6 @@ def main() -> int:
             compare("server", REMOTE_SERVER, p1, p2),
         ],
     }
-    OUT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(str(OUT))
     for lane in report["lanes"]:
         print(f"\n=== {lane['lane'].upper()}: ONLY ON REMOTE (нет локально, сотрутся) ===")
         for item in lane["delete"]:
