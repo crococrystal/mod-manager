@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { getModalPortalRoot } from '../lib/modalPortal.js';
@@ -15,6 +16,17 @@ export function Modal({
   showClose = true,
   ariaLabel
 }) {
+  useEffect(() => {
+    if (!onClose) return undefined;
+
+    function handleEscape(event) {
+      if (event.key === 'Escape') onClose();
+    }
+
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
+
   const dialogLabel = ariaLabel ?? title ?? 'Диалог';
   const showHeader = Boolean(title || headerExtra || showClose);
   const modal = (

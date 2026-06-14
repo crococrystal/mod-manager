@@ -1,4 +1,4 @@
-import { Search, Settings, SlidersHorizontal, X } from 'lucide-react';
+import { Check, RefreshCw, Search, Settings, SlidersHorizontal, X } from 'lucide-react';
 import headerAppLogo from '../assets/header-app-logo.svg';
 import { filters, sourceIcons } from '../lib/modMeta.jsx';
 
@@ -9,6 +9,8 @@ export function AppToolbar({
   filter,
   settingsOpen,
   busy,
+  updatesLoading = false,
+  updatesStatus = 'idle',
   onQueryChange,
   onClearQuery,
   onToggleSearchSource,
@@ -40,6 +42,27 @@ export function AppToolbar({
       </div>
     );
   }
+
+  const updatesActive = searchSource === 'updates';
+  const updatesIconBusy = updatesLoading;
+  const updatesIconClass =
+    updatesStatus === 'available'
+      ? ' searchProviderToggleUpdates--available'
+      : updatesStatus === 'current'
+      ? ' searchProviderToggleUpdates--current'
+      : updatesIconBusy
+      ? ' searchProviderToggleUpdates--loading'
+      : '';
+  const updatesTitle = updatesIconBusy
+    ? 'Проверка обновлений модов…'
+    : updatesStatus === 'available'
+    ? 'Есть доступные обновления'
+    : updatesStatus === 'current'
+    ? 'Все моды обновлены'
+    : updatesActive
+    ? 'Закрыть обновления'
+    : 'Проверить обновления модов';
+  const UpdatesIcon = updatesStatus === 'current' && !updatesIconBusy ? Check : RefreshCw;
 
   return (
     <div className="topToolbar" data-tauri-drag-region>
@@ -88,7 +111,9 @@ export function AppToolbar({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={
-            searchSource === 'modrinth'
+            searchSource === 'updates'
+              ? 'Фильтр списка обновлений'
+              : searchSource === 'modrinth'
               ? 'Поиск на Modrinth'
               : searchSource === 'curseforge'
               ? 'Поиск на CurseForge'
@@ -129,6 +154,21 @@ export function AppToolbar({
               </button>
             );
           })}
+          <button
+            type="button"
+            className={`searchProviderToggle searchProviderToggleUpdates${updatesActive ? ' active' : ''}${updatesIconClass}`}
+            onClick={() => onToggleSearchSource('updates')}
+            disabled={busy}
+            title={updatesTitle}
+            aria-label={updatesTitle}
+            aria-pressed={updatesActive}
+          >
+            <UpdatesIcon
+              size={14}
+              className={updatesIconBusy ? 'spin' : undefined}
+              strokeWidth={updatesStatus === 'current' ? 2.5 : 2}
+            />
+          </button>
         </span>
       </label>
     </div>

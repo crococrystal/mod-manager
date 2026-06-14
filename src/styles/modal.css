@@ -5,7 +5,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 18px;
+  padding: var(--modal-gutter) var(--modal-gutter-inline);
   background: rgb(0 0 0 / 0.58);
 }
 
@@ -13,7 +13,7 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: min(520px, 100%);
-  max-height: min(680px, calc(100vh - 36px));
+  max-height: calc(100vh - var(--title-bar-height) - 2 * var(--modal-gutter));
   border: 1px solid var(--line-strong);
   border-radius: 10px;
   background: #171d20;

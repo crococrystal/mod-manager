@@ -17,6 +17,7 @@ mod prefetch;
 mod provider_labels;
 mod providers;
 mod remote;
+mod server_sync;
 mod settings;
 mod tags;
 mod util;
@@ -31,6 +32,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(bootstrap::BootstrapState::new())
+        .manage(server_sync::ServerSyncLanes::new())
         .setup(|app| {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
@@ -80,6 +82,12 @@ pub fn run() {
             commands::switch_mod_source,
             commands::list_provider_versions,
             commands::install_provider_version,
+            server_sync::test_server_sync,
+            server_sync::get_server_sync_statuses,
+            server_sync::cancel_server_sync_lane,
+            server_sync::preview_server_sync_lane,
+            server_sync::sync_mods_to_server_lane,
+            commands::check_mod_updates,
             commands::search_provider_catalog,
             commands::preview_catalog_install,
             commands::catalog_project_details,

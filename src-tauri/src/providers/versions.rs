@@ -25,6 +25,7 @@ pub(crate) struct ListProviderVersionsRequest {
     #[serde(default)]
     pub project_id: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub filename: String,
 }
 
@@ -129,11 +130,6 @@ fn list_versions_blocking(
     let source = normalize_source(&request.source)?;
     let settings = read_settings(app)?;
     let paths = resolve_paths(&settings)?;
-    if let Some(filename) = clean_string(&request.filename) {
-        if paths.resolve_mod_jar(&filename).is_none() {
-            return Err("Файл мода не найден в текущей сборке.".to_string());
-        }
-    }
     let target = detect_instance_target(&paths);
     let client = http_client().ok_or_else(|| "Не удалось создать HTTP-клиент.".to_string())?;
     let project_id = request
@@ -179,10 +175,22 @@ pub(crate) fn list_modrinth_versions(
     project_id: &str,
     target: &InstanceTarget,
 ) -> Result<Vec<ProviderVersion>, String> {
+    list_modrinth_versions_limited(client, project_id, target, None)
+}
+
+pub(crate) fn list_modrinth_versions_limited(
+    client: &reqwest::blocking::Client,
+    project_id: &str,
+    target: &InstanceTarget,
+    limit: Option<u32>,
+) -> Result<Vec<ProviderVersion>, String> {
     let mut request = client.get(format!(
         "https://api.modrinth.com/v2/project/{project_id}/version"
     ));
     let mut query = vec![("include_changelog", "false".to_string())];
+    if let Some(limit) = limit {
+        query.push(("limit", limit.to_string()));
+    }
     if let Some(version) = target.minecraft_version.as_deref().and_then(clean_string) {
         query.push((
             "game_versions",
@@ -269,7 +277,18 @@ pub(crate) fn list_curseforge_versions(
     project_id: &str,
     target: &InstanceTarget,
 ) -> Result<Vec<ProviderVersion>, String> {
-    let mut path = format!("mods/{project_id}/files?pageSize=50");
+    list_curseforge_versions_limited(client, settings, project_id, target, None)
+}
+
+pub(crate) fn list_curseforge_versions_limited(
+    client: &reqwest::blocking::Client,
+    settings: &Settings,
+    project_id: &str,
+    target: &InstanceTarget,
+    page_size: Option<u32>,
+) -> Result<Vec<ProviderVersion>, String> {
+    let page_size = page_size.unwrap_or(50);
+    let mut path = format!("mods/{project_id}/files?pageSize={page_size}");
     if let Some(version) = target.minecraft_version.as_deref().and_then(clean_string) {
         path.push_str("&gameVersion=");
         path.push_str(&urlencoding::encode(&version));

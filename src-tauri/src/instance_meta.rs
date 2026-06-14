@@ -6,7 +6,7 @@ use crate::{
     settings::InstancePaths,
 };
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InstanceTarget {
     #[serde(skip_serializing_if = "Option::is_none")]

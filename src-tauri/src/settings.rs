@@ -12,6 +12,21 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ServerSyncSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub ssh_host: String,
+    #[serde(default)]
+    pub server_mods_path: String,
+    #[serde(default)]
+    pub distribution_mods_path: String,
+    #[serde(default = "default_true")]
+    pub delete_extra_remote_jars: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Settings {
@@ -27,6 +42,8 @@ pub(crate) struct Settings {
     pub auto_check_updates: bool,
     #[serde(default)]
     pub recent_instances: Vec<String>,
+    #[serde(default)]
+    pub server_sync: ServerSyncSettings,
 }
 
 impl Default for Settings {
@@ -38,6 +55,7 @@ impl Default for Settings {
             auto_prefetch_dependencies: true,
             auto_check_updates: true,
             recent_instances: Vec::new(),
+            server_sync: ServerSyncSettings::default(),
         }
     }
 }
@@ -54,6 +72,7 @@ pub(crate) struct SettingsView {
     pub auto_prefetch_dependencies: bool,
     pub auto_check_updates: bool,
     pub recent_instances: Vec<String>,
+    pub server_sync: ServerSyncSettings,
     pub cache_status: Option<instance_registry::InstanceCacheStatus>,
 }
 
@@ -334,6 +353,7 @@ pub(crate) fn settings_view(app: &AppHandle, settings: Settings) -> Result<Setti
         auto_prefetch_dependencies: settings.auto_prefetch_dependencies,
         auto_check_updates: settings.auto_check_updates,
         recent_instances: settings.recent_instances.clone(),
+        server_sync: settings.server_sync.clone(),
         cache_status,
     })
 }

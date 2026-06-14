@@ -22,6 +22,8 @@ use crate::tags::{read_tags, write_tags};
 use crate::util::{file_mtime_millis, now_iso, path_string};
 
 mod install_catalog;
+mod updates;
+mod updates_cache;
 mod versions;
 pub(crate) use install_catalog::{
     catalog_project_details, install_from_catalog, preview_catalog_install, search_catalog,
@@ -29,6 +31,7 @@ pub(crate) use install_catalog::{
     CatalogInstallResult, CatalogProjectDetails, CatalogProjectDetailsRequest,
     CatalogSearchRequest, CatalogSearchResponse,
 };
+pub(crate) use updates::{check_mod_updates_blocking, CheckModUpdatesRequest, CheckModUpdatesResponse};
 pub(crate) use versions::{
     install_version, list_versions, InstallProviderVersionRequest, InstallProviderVersionResult,
     ListProviderVersionsRequest, ProviderVersionsPayload,

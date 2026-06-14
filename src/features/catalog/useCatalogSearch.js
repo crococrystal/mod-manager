@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { searchProviderCatalog } from '../../api.js';
 
 const MAX_SEARCH_CACHE_ENTRIES = 80;
@@ -21,12 +21,23 @@ function writeCachedSearch(cache, scope, source, query, payload) {
   }
 }
 
+function filterUpdateResults(results, query) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return results;
+  return results.filter((item) => {
+    const title = item.title?.toLowerCase() ?? '';
+    const summary = item.summary?.toLowerCase() ?? '';
+    return title.includes(needle) || summary.includes(needle);
+  });
+}
+
 export function useCatalogSearch({
   query,
   setQuery,
   canSearch,
   curseforgeApiKeySet,
-  cacheScope
+  cacheScope,
+  updatesSnapshot
 }) {
   const [source, setSource] = useState(null);
   const [results, setResults] = useState([]);
@@ -70,7 +81,11 @@ export function useCatalogSearch({
           setLoading(false);
           return null;
         }
-        if (cached) {
+        if (nextSource === 'updates') {
+          setResults([]);
+          setTarget(null);
+          setLoading(false);
+        } else if (cached) {
           setResults(cached.candidates ?? []);
           setTarget(cached.target ?? null);
           setLoading(false);
@@ -87,6 +102,7 @@ export function useCatalogSearch({
   const selectCandidate = useCallback(
     (candidate) => {
       if (!source || !candidate) return;
+      if (source === 'updates') return;
       setInstallSelection({ source, candidate });
     },
     [source]
@@ -99,6 +115,10 @@ export function useCatalogSearch({
       setTarget(null);
       setLoading(false);
       setError('');
+      return undefined;
+    }
+
+    if (source === 'updates') {
       return undefined;
     }
 
@@ -152,13 +172,25 @@ export function useCatalogSearch({
     };
   }, [source, query, canSearch, curseforgeApiKeySet, cacheScope]);
 
+  const updatesResults = useMemo(() => {
+    if (source !== 'updates') return [];
+    return filterUpdateResults(updatesSnapshot?.candidates ?? [], query);
+  }, [source, updatesSnapshot?.candidates, query]);
+
+  const visibleResults = source === 'updates' ? updatesResults : results;
+  const visibleTarget = source === 'updates' ? (updatesSnapshot?.target ?? null) : target;
+  const visibleLoading =
+    source === 'updates' ? Boolean(updatesSnapshot?.loading) : loading;
+  const visibleError = source === 'updates' ? (updatesSnapshot?.error ?? '') : error;
+
   return {
     source,
     mode: Boolean(source),
-    results,
-    target,
-    loading,
-    error,
+    results: visibleResults,
+    target: visibleTarget,
+    loading: visibleLoading,
+    error: visibleError,
+    updatesBlocked: source === 'updates' ? Boolean(updatesSnapshot?.blocked) : false,
     installSelection,
     toggleSource,
     clearQuery,

@@ -267,31 +267,6 @@ export function ProviderDialog({
           {searchError ? <p className="providerSearchError">{searchError}</p> : null}
 
           <div className="dependencyModal providerModal" role="dialog" aria-modal="true" aria-label="Поставщик мода">
-            {providerOptions.map((item) => {
-              const icon = sourceIcons[item.id]?.icon;
-              const active = mod.source === item.id;
-              const selected = Boolean(descriptionCandidate) && descriptionSource === item.id;
-              const checking = checkingProvider === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`providerOption${active ? ' active' : ''}${selected ? ' selected' : ''}`}
-                  onClick={() => openPlatform(item.id)}
-                  disabled={uiLocked}
-                >
-                  {icon ? <img src={icon} alt="" /> : null}
-                  <span>{item.label}</span>
-                  {checking ? (
-                    <LoaderCircle size={18} className="spin providerOptionSpinner" />
-                  ) : active ? (
-                    <strong>Выбран</strong>
-                  ) : (
-                    <span className="providerOptionHint">Выбрать</span>
-                  )}
-                </button>
-              );
-            })}
             <CatalogProjectDescriptionPanel
               className="providerDescriptionPanel"
               description={description}
@@ -307,6 +282,33 @@ export function ProviderDialog({
                 <ProviderSearchStatus state={notFound} uiLocked={uiLocked} onPick={applyCandidate} />
               ) : null}
             </CatalogProjectDescriptionPanel>
+            <div className="providerOptionRow">
+              {providerOptions.map((item) => {
+                const icon = sourceIcons[item.id]?.icon;
+                const active = mod.source === item.id;
+                const selected = Boolean(descriptionCandidate) && descriptionSource === item.id;
+                const checking = checkingProvider === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`providerOption${active ? ' active' : ''}${selected ? ' selected' : ''}`}
+                    onClick={() => openPlatform(item.id)}
+                    disabled={uiLocked}
+                  >
+                    {icon ? <img src={icon} alt="" /> : null}
+                    <span>{item.label}</span>
+                    {checking ? (
+                      <LoaderCircle size={18} className="spin providerOptionSpinner" />
+                    ) : active ? (
+                      <strong>Выбран</strong>
+                    ) : (
+                      <span className="providerOptionHint">Выбрать</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </ModalModNavRail>
       </div>

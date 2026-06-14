@@ -16,7 +16,8 @@ import {
   scanMods,
   syncProviderData,
   updateModTags,
-  uploadCover
+  uploadCover,
+  installProviderVersion
 } from './api.js';
 import { CatalogInstallDialog } from './features/catalog/CatalogInstallDialog.jsx';
 import { CatalogSearchPanel } from './features/catalog/CatalogSearchPanel.jsx';
@@ -33,9 +34,29 @@ import { ModTable } from './features/mods/ModTable.jsx';
 import { ProviderDialog } from './features/mods/ProviderDialog.jsx';
 import { TagsDialog } from './features/mods/TagsDialog.jsx';
 import { VersionDialog } from './features/mods/VersionDialog.jsx';
+import { UpdatesVersionPanel } from './features/mods/UpdatesVersionPanel.jsx';
 import { SettingsDialog } from './features/settings/SettingsDialog.jsx';
 import { useAppUpdater } from './hooks/useAppUpdater.js';
+import {
+  formatSingleUpdateConfirmMessage,
+  formatUpdateAllConfirmMessage
+} from './lib/updateConfirmMessages.js';
+import { projectIdFor } from './features/mods/versionListUtils.js';
 import { canCheckForUpdates } from './lib/updater.js';
+import { readSettingsTab, writeSettingsTab } from './lib/settingsTabStorage.js';
+import { buildWorkspaceFooter } from './features/updates/buildWorkspaceFooter.js';
+import {
+  buildServerSyncFooter,
+  mergeWorkspaceFooters
+} from './features/server-sync/buildServerSyncFooter.js';
+import { useServerSyncProgress } from './features/server-sync/useServerSyncProgress.js';
+import {
+  shouldShowUpdatesPanel,
+  updatesToolbarStatus,
+  useUpdatesFeature
+} from './features/updates/useUpdatesFeature.js';
+import { modNeedsUpdate } from './features/updates/updateCandidateSync.js';
+import { modByKey } from './lib/modMeta.jsx';
 import { modMatchesWorkspaceFilters } from './lib/modFilters.js';
 import { openExternalUrl } from './lib/openExternalUrl.js';
 import { normalizeModsGraph } from './lib/usedBy.js';
@@ -141,13 +162,6 @@ function refreshedProviderLabelsPatch(result) {
   return modTagsUpdatePatch(result);
 }
 
-function syncProgressLabel(progress) {
-  if (!progress) return 'Синхронизация · Подготовка…';
-  if (!progress.total) return 'Синхронизация · Подготовка…';
-  const tail = progress.name ? ` · ${progress.name}` : '';
-  return `Синхронизация · ${progress.index}/${progress.total}${tail}`;
-}
-
 function isTextEntryTarget(target) {
   return (
     target instanceof HTMLElement &&
@@ -245,9 +259,17 @@ function App() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTabState] = useState(() => readSettingsTab());
+  const setSettingsTab = useCallback((tab) => {
+    writeSettingsTab(tab);
+    setSettingsTabState(tab);
+  }, []);
+  const serverSync = useServerSyncProgress();
   const [progress, setProgress] = useState(null);
   const [providerKey, setProviderKey] = useState(null);
   const [versionKey, setVersionKey] = useState(null);
+  const [updateConfirm, setUpdateConfirm] = useState(null);
+  const [updateInstallVersionId, setUpdateInstallVersionId] = useState(null);
   const [tagsKey, setTagsKey] = useState(null);
   const [tagsSavingKey, setTagsSavingKey] = useState(null);
   const [relationsKey, setRelationsKey] = useState(null);
@@ -267,6 +289,7 @@ function App() {
   const syncRunRef = useRef(0);
   const syncingRef = useRef(false);
   const sourceIdentifyRunRef = useRef(0);
+  const suppressModAutoSelectRef = useRef(false);
   const startupUpdateCheckedRef = useRef(false);
   const updater = useAppUpdater();
 
@@ -283,6 +306,82 @@ function App() {
   }, [mods, query, filter, sort]);
 
   const canShowWorkspace = Boolean(settings?.instanceRoot);
+  const modsByKey = useMemo(() => modByKey(mods), [mods]);
+
+  const applyPayload = useCallback((next) => {
+    const normalized = withLocalCovers(next);
+    setPayload(normalized);
+    setSettings(normalized.settings);
+    setSelected((current) => {
+      if (!normalized.mods.length) return null;
+      if (suppressModAutoSelectRef.current) {
+        suppressModAutoSelectRef.current = false;
+        return null;
+      }
+      if (!current?.filename) return normalized.mods[0];
+      return normalized.mods.find((mod) => mod.filename === current.filename) ?? normalized.mods[0];
+    });
+  }, []);
+
+  const updateModInPayload = useCallback((key, patch, { normalizeGraph = true } = {}) => {
+    setPayload((current) => {
+      if (!current) return current;
+      let touched = false;
+      const mods = current.mods.map((mod) => {
+        if (mod.key !== key) return mod;
+        touched = true;
+        return { ...mod, ...patch };
+      });
+      if (!touched) return current;
+      if (normalizeGraph) normalizeModsGraph(mods);
+      return { ...current, mods, stats: statsForMods(mods) };
+    });
+    setSelected((current) => (current?.key === key ? { ...current, ...patch } : current));
+  }, []);
+
+  const finalizeModsGraph = useCallback(() => {
+    setPayload((current) => {
+      if (!current?.mods?.length) return current;
+      const mods = current.mods.map((mod) => ({ ...mod }));
+      normalizeModsGraph(mods);
+      return { ...current, mods, stats: statsForMods(mods) };
+    });
+  }, []);
+
+  const {
+    workspaceInitializing,
+    updatesInitBlocked,
+    snapshot: updatesSnapshot,
+    updateAllBusy,
+    updateAllProgress,
+    updateAllError,
+    runModUpdatesInstall,
+    updatesCandidates,
+    updatesCheckedAtMs,
+    updatesLoadingVisible,
+    updatesFailedProjects,
+    updatesError,
+    updatesReady,
+    removeUpdateCandidate,
+    syncUpdateCandidates
+  } = useUpdatesFeature({
+    enabled: canShowWorkspace,
+    instanceRoot: settings?.instanceRoot,
+    syncing,
+    scanning,
+    busy,
+    bootstrapping,
+    updateInstallBusy: Boolean(updateInstallVersionId),
+    modsByKey,
+    cacheScope: settings?.instanceRoot,
+    updateModInPayload,
+    finalizeModsGraph,
+    setSelected,
+    setSelectedKeys,
+    setError,
+    setInfo
+  });
+
   const {
     source: catalogSource,
     mode: catalogMode,
@@ -290,6 +389,7 @@ function App() {
     target: catalogTarget,
     loading: catalogLoading,
     error: catalogError,
+    updatesBlocked: catalogUpdatesBlocked,
     installSelection: catalogInstallSelection,
     toggleSource: toggleSearchSource,
     clearQuery: clearCatalogQuery,
@@ -301,7 +401,8 @@ function App() {
     setQuery,
     canSearch: canShowWorkspace,
     curseforgeApiKeySet: settings?.curseforgeApiKeySet,
-    cacheScope: settings?.instanceRoot
+    cacheScope: settings?.instanceRoot,
+    updatesSnapshot
   });
 
   const catalogInstalledProjectIdsBySource = useMemo(() => {
@@ -332,32 +433,52 @@ function App() {
       catalogInstallInstalledProjectIds.has(String(catalogInstallSelection.candidate.id))
   );
 
-  const applyPayload = useCallback((next) => {
-    const normalized = withLocalCovers(next);
-    setPayload(normalized);
-    setSettings(normalized.settings);
-    setSelected((current) => {
-      if (!normalized.mods.length) return null;
-      if (!current?.filename) return normalized.mods[0];
-      return normalized.mods.find((mod) => mod.filename === current.filename) ?? normalized.mods[0];
-    });
-  }, []);
+  const catalogModForItem = useCallback(
+    (item) => {
+      if (catalogSource !== 'updates') return null;
+      return modsByKey.get(item.key ?? item.id) ?? null;
+    },
+    [catalogSource, modsByKey]
+  );
 
-  const updateModInPayload = useCallback((key, patch) => {
-    setPayload((current) => {
-      if (!current) return current;
-      let touched = false;
-      const mods = current.mods.map((mod) => {
-        if (mod.key !== key) return mod;
-        touched = true;
-        return { ...mod, ...patch };
-      });
-      if (!touched) return current;
-      normalizeModsGraph(mods);
-      return { ...current, mods, stats: statsForMods(mods) };
+  const isUpdatesMode = catalogMode && catalogSource === 'updates';
+
+  const updatesListMods = useMemo(() => {
+    if (!isUpdatesMode) return [];
+    return catalogResults
+      .map((item) => modsByKey.get(item.key ?? item.id))
+      .filter(Boolean);
+  }, [isUpdatesMode, catalogResults, modsByKey]);
+
+  const showUpdatesPanel = shouldShowUpdatesPanel({
+    isUpdatesMode,
+    updatesInitBlocked,
+    updateAllBusy,
+    updateInstallBusy: Boolean(updateInstallVersionId),
+    updatesLoadingVisible,
+    updatesCandidates,
+    selectedKeys
+  });
+  const showAside = !catalogMode || (isUpdatesMode && showUpdatesPanel);
+  const updatesStatus = updatesToolbarStatus({
+    updatesInitBlocked,
+    updatesLoadingVisible,
+    updatesCheckedAtMs,
+    updatesCandidates
+  });
+
+  const updatesSelectedMod =
+    isUpdatesMode && selected ? modsByKey.get(selected.key) ?? selected : null;
+
+  useEffect(() => {
+    if (!isUpdatesMode) return;
+    const candidateKeys = new Set(updatesCandidates.map((item) => item.key ?? item.id));
+    setSelectedKeys((current) => {
+      const next = new Set([...current].filter((key) => candidateKeys.has(key)));
+      return next.size === current.size ? current : next;
     });
-    setSelected((current) => (current?.key === key ? { ...current, ...patch } : current));
-  }, []);
+    setSelected((current) => (current && candidateKeys.has(current.key) ? current : null));
+  }, [isUpdatesMode, updatesCandidates]);
 
   const loadSettings = useCallback(async () => {
     const next = await getSettings();
@@ -439,6 +560,7 @@ function App() {
   }, [settings, updater]);
 
   useEffect(() => {
+    if (isUpdatesMode) return;
     if (!visible.length) {
       setSelected(null);
       setSelectedKeys((current) => (current.size ? new Set() : current));
@@ -450,7 +572,7 @@ function App() {
       selectionAnchorRef.current = next.key;
       setSelectedKeys(new Set([next.key]));
     }
-  }, [visible, selected]);
+  }, [visible, selected, isUpdatesMode]);
 
   useEffect(() => {
     const visibleKeys = new Set(visible.map((mod) => mod.key));
@@ -584,7 +706,10 @@ function App() {
     return modContextMenu.keys.map((key) => byKey.get(key)).filter(Boolean);
   }, [mods, modContextMenu]);
   const contextMenuLabel = contextMenuMods.length === 1 ? contextMenuMods[0].displayName : '';
-  const contextMenuPageUrl = contextMenuMods.length === 1 ? contextMenuMods[0].sourceUrl : null;
+  const contextMenuPageUrl =
+    modContextMenu?.mode === 'updates' || contextMenuMods.length !== 1
+      ? null
+      : contextMenuMods[0].sourceUrl;
 
   const closeModContextMenu = useCallback(() => {
     setModContextMenu(null);
@@ -604,9 +729,9 @@ function App() {
         selectionAnchorRef.current = fresh.key;
         setSelectedKeys(new Set([fresh.key]));
       }
-      setModContextMenu({ x: event.clientX, y: event.clientY, keys });
+      setModContextMenu({ x: event.clientX, y: event.clientY, keys, mode: isUpdatesMode ? 'updates' : undefined });
     },
-    [mods, selectedKeys]
+    [isUpdatesMode, mods, selectedKeys]
   );
 
   const handleContextCopyMods = useCallback(() => {
@@ -624,6 +749,13 @@ function App() {
     requestDeleteMods(contextMenuMods);
   }, [contextMenuMods, requestDeleteMods]);
 
+  const handleContextUpdateMods = useCallback(() => {
+    const keys = contextMenuMods.map((item) => item.key);
+    if (!keys.length) return;
+    setModContextMenu(null);
+    setUpdateConfirm({ scope: 'selected', keys });
+  }, [contextMenuMods]);
+
   useEffect(() => {
     function handleKeyDown(event) {
       const target = event.target;
@@ -633,11 +765,12 @@ function App() {
 
       const command = event.metaKey || event.ctrlKey;
       if (command && event.key.toLowerCase() === 'a' && canShowWorkspace) {
-        if (target instanceof HTMLElement && target.closest('.descriptionCell')) {
+        if (!isUpdatesMode && target instanceof HTMLElement && target.closest('.descriptionCell')) {
           return;
         }
         event.preventDefault();
-        setSelectedKeys(new Set(visible.map((mod) => mod.key)));
+        const list = isUpdatesMode ? updatesListMods : visible;
+        setSelectedKeys(new Set(list.map((mod) => mod.key)));
         return;
       }
 
@@ -660,7 +793,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [canShowWorkspace, copyModKeys, moveSelection, selected?.key, selectedKeys, visible]);
+  }, [canShowWorkspace, copyModKeys, isUpdatesMode, moveSelection, selected?.key, selectedKeys, updatesListMods, visible]);
 
   useEffect(() => {
     function suppressNativeContextMenu(event) {
@@ -757,7 +890,11 @@ function App() {
         Boolean(nextCurseForgeKey) && previousCurseForgeKey !== nextCurseForgeKey;
       if (instanceChanged) {
         sourceIdentifyRunRef.current += 1;
+        suppressModAutoSelectRef.current = true;
         setProgress(null);
+        setSelected(null);
+        setSelectedKeys(new Set());
+        resetCatalogSearch();
       }
       setBusy(true);
       setError('');
@@ -767,18 +904,34 @@ function App() {
         const shouldRefreshProviderLinks = Boolean(saved.instanceRoot && curseForgeKeyChanged);
         let providerLinksCoveredByBootstrap = false;
         if (options.scan !== false && saved.instanceRoot) {
-          const next = await scanMods();
-          applyPayload(next);
-          if (options.bootstrap && saved.instanceRoot) {
-            providerLinksCoveredByBootstrap = needsBootstrap(saved.cacheStatus, {
-              force: options.forceBootstrap
-            });
-            if (providerLinksCoveredByBootstrap) {
-              void runBootstrap(saved.cacheStatus, { force: options.forceBootstrap });
+          if (instanceChanged) {
+            setScanning(true);
+          }
+          try {
+            const next = await scanMods();
+            applyPayload(next);
+            if (instanceChanged) {
+              suppressModAutoSelectRef.current = true;
+              setSelected(null);
+              setSelectedKeys(new Set());
             }
-          } else if (needsBootstrap(saved.cacheStatus)) {
-            providerLinksCoveredByBootstrap = true;
-            void runBootstrap(saved.cacheStatus);
+            if (options.bootstrap && saved.instanceRoot) {
+              providerLinksCoveredByBootstrap = needsBootstrap(saved.cacheStatus, {
+                force: options.forceBootstrap
+              });
+              if (providerLinksCoveredByBootstrap) {
+                setBootstrapping(true);
+                void runBootstrap(saved.cacheStatus, { force: options.forceBootstrap });
+              }
+            } else if (needsBootstrap(saved.cacheStatus)) {
+              providerLinksCoveredByBootstrap = true;
+              setBootstrapping(true);
+              void runBootstrap(saved.cacheStatus);
+            }
+          } finally {
+            if (instanceChanged) {
+              setScanning(false);
+            }
           }
         }
         if (shouldRefreshProviderLinks && !providerLinksCoveredByBootstrap) {
@@ -799,7 +952,7 @@ function App() {
         setBusy(false);
       }
     },
-    [applyPayload, runBootstrap, settings?.curseforgeApiKey, settings?.instanceRoot]
+    [applyPayload, resetCatalogSearch, runBootstrap, settings?.curseforgeApiKey, settings?.instanceRoot]
   );
 
   const patchMod = useCallback(
@@ -963,6 +1116,14 @@ function App() {
   }, [applyPayload, runBootstrap]);
 
   const handleCancelProgress = useCallback(() => {
+    if (
+      (!settingsOpen || settingsTab !== 'server') &&
+      (serverSync.server.syncing || serverSync.distribution.syncing)
+    ) {
+      if (serverSync.server.syncing) void serverSync.cancel('server');
+      if (serverSync.distribution.syncing) void serverSync.cancel('distribution');
+      return;
+    }
     if (!bootstrapping && !syncing) return;
     bootstrapRunRef.current += 1;
     syncRunRef.current += 1;
@@ -970,7 +1131,7 @@ function App() {
     setSyncing(false);
     setProgress(null);
     void cancelBackgroundTask();
-  }, [bootstrapping, syncing]);
+  }, [bootstrapping, serverSync, settingsOpen, settingsTab, syncing]);
 
   const handleRefreshModAssets = useCallback(
     async (key) => {
@@ -1052,6 +1213,131 @@ function App() {
     [updateModInPayload]
   );
 
+  const handleUpdatesVersionInstalled = useCallback(
+    ({ key, ...patch }) => {
+      updateModInPayload(key, patch);
+      setSelected((current) => (current?.key === key ? null : current));
+      setSelectedKeys((current) => {
+        if (!current.has(key)) return current;
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+      const base = modsByKey.get(key);
+      const updatedMod = base ? { ...base, ...patch } : { key, ...patch };
+      if (!modNeedsUpdate(updatedMod, settings?.instanceRoot)) {
+        removeUpdateCandidate(key);
+      }
+    },
+    [modsByKey, removeUpdateCandidate, settings?.instanceRoot, updateModInPayload]
+  );
+
+  useEffect(() => {
+    if (!isUpdatesMode || updatesLoadingVisible) return;
+    syncUpdateCandidates(modsByKey, settings?.instanceRoot);
+  }, [
+    isUpdatesMode,
+    modsByKey,
+    settings?.instanceRoot,
+    syncUpdateCandidates,
+    updatesCandidates,
+    updatesLoadingVisible
+  ]);
+
+  const handleToggleSearchSource = useCallback(
+    (nextSource) => {
+      if (nextSource === 'updates') {
+        if (catalogSource !== 'updates') {
+          setQuery('');
+          setSelected(null);
+          setSelectedKeys(new Set());
+        }
+      } else if (catalogSource === 'updates') {
+        setSelected(null);
+        setSelectedKeys(new Set());
+      }
+      toggleSearchSource(nextSource);
+    },
+    [catalogSource, setQuery, toggleSearchSource]
+  );
+
+  const handleUpdateAllMods = useCallback(async () => {
+    await runModUpdatesInstall(updatesCandidates);
+  }, [runModUpdatesInstall, updatesCandidates]);
+
+  const handleUpdateSelectedMods = useCallback(
+    async (keys) => {
+      const keySet = new Set(keys);
+      const candidates = updatesCandidates.filter((item) => keySet.has(item.key ?? item.id));
+      await runModUpdatesInstall(candidates);
+    },
+    [runModUpdatesInstall, updatesCandidates]
+  );
+
+  const performUpdatesVersionInstall = useCallback(
+    async (mod, version) => {
+      const projectId = projectIdFor(mod);
+      if (!mod || !version || !projectId) return;
+
+      setUpdateInstallVersionId(version.id);
+      setError('');
+
+      try {
+        const result = await installProviderVersion({
+          key: mod.key,
+          source: mod.source,
+          projectId,
+          filename: mod.filename,
+          versionId: version.id,
+          fileId: version.fileId ?? undefined,
+          downloadUrl: version.downloadUrl ?? undefined,
+          downloadFilename: version.filename,
+          versionNumber: version.versionNumber
+        });
+        handleUpdatesVersionInstalled(result);
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setUpdateInstallVersionId(null);
+      }
+    },
+    [handleUpdatesVersionInstalled, settings?.instanceRoot]
+  );
+
+  const updateConfirmBusy = updateAllBusy || Boolean(updateInstallVersionId);
+
+  const updateConfirmMessage = useMemo(() => {
+    if (!updateConfirm) return '';
+    if (updateConfirm.scope === 'all') {
+      return formatUpdateAllConfirmMessage(updatesCandidates.length);
+    }
+    if (updateConfirm.scope === 'selected') {
+      return formatUpdateAllConfirmMessage(updateConfirm.keys.length);
+    }
+    return formatSingleUpdateConfirmMessage(updateConfirm.mod, updateConfirm.version);
+  }, [updateConfirm, updatesCandidates.length]);
+
+  const confirmPendingUpdate = useCallback(async () => {
+    if (!updateConfirm || updateConfirmBusy) return;
+    const pending = updateConfirm;
+    setUpdateConfirm(null);
+    if (pending.scope === 'all') {
+      await handleUpdateAllMods();
+      return;
+    }
+    if (pending.scope === 'selected') {
+      await handleUpdateSelectedMods(pending.keys);
+      return;
+    }
+    await performUpdatesVersionInstall(pending.mod, pending.version);
+  }, [
+    handleUpdateAllMods,
+    handleUpdateSelectedMods,
+    performUpdatesVersionInstall,
+    updateConfirm,
+    updateConfirmBusy
+  ]);
+
   const handleCatalogInstalled = useCallback(
     async (result) => {
       closeCatalogInstall();
@@ -1121,17 +1407,21 @@ function App() {
   const handleTableSelect = useCallback(
     (mod, event) => {
       setSelected(mod);
-      setRelationsKey((current) => (current ? mod.key : current));
+      if (!isUpdatesMode) {
+        setRelationsKey((current) => (current ? mod.key : current));
+      }
+
+      const list = isUpdatesMode ? updatesListMods : visible;
 
       if (event?.shiftKey) {
         const anchorKey = selectionAnchorRef.current ?? selected?.key;
         if (anchorKey) {
-          const anchorIndex = visible.findIndex((item) => item.key === anchorKey);
-          const targetIndex = visible.findIndex((item) => item.key === mod.key);
+          const anchorIndex = list.findIndex((item) => item.key === anchorKey);
+          const targetIndex = list.findIndex((item) => item.key === mod.key);
           if (anchorIndex >= 0 && targetIndex >= 0) {
             const start = Math.min(anchorIndex, targetIndex);
             const end = Math.max(anchorIndex, targetIndex);
-            setSelectedKeys(new Set(visible.slice(start, end + 1).map((item) => item.key)));
+            setSelectedKeys(new Set(list.slice(start, end + 1).map((item) => item.key)));
             return;
           }
         }
@@ -1152,31 +1442,51 @@ function App() {
         return;
       }
 
+      if (isUpdatesMode && selectedKeys.size === 1 && selectedKeys.has(mod.key)) {
+        setSelected(null);
+        selectionAnchorRef.current = null;
+        setSelectedKeys(new Set());
+        return;
+      }
+
       selectionAnchorRef.current = mod.key;
       setSelectedKeys(new Set([mod.key]));
     },
-    [visible, selected?.key]
+    [isUpdatesMode, selectedKeys, selected?.key, updatesListMods, visible]
   );
 
-  const progressPercent =
-    progress?.total > 0 ? Math.min(100, Math.round((progress.index / progress.total) * 100)) : 0;
-  const progressIndeterminate = Boolean(
-    (bootstrapping || syncing || scanning) && !(progress?.total > 0)
-  );
-  const uiLocked = busy;
+  const updatesCenterLoadingVisible =
+    isUpdatesMode &&
+    catalogLoading &&
+    catalogResults.length === 0 &&
+    !updateAllBusy;
 
-  const progressLabel = syncing
-    ? syncProgressLabel(progress)
-    : bootstrapping && progress
-    ? `Подготовка · ${progress.index}/${progress.total}${
-        progress.name ? ` · ${progress.name}` : ''
-      }`
-    : scanning
-    ? 'Сканирование модов…'
-    : bootstrapping
-    ? 'Подготовка…'
-    : '';
-  const showProgress = bootstrapping || syncing || scanning;
+  const serverSyncFooter = buildServerSyncFooter({
+    enabled: !settingsOpen || settingsTab !== 'server',
+    server: serverSync.server,
+    distribution: serverSync.distribution,
+    visibleResult: serverSync.visibleResult
+  });
+
+  const workspaceFooter = mergeWorkspaceFooters(
+    buildWorkspaceFooter({
+      workspaceInitializing,
+      bootstrapping,
+      syncing,
+      scanning,
+      progress,
+      updateAllBusy,
+      updateAllProgress,
+      updatesError,
+      updateAllError,
+      updatesFailedProjects,
+      updatesLoadingVisible,
+      isUpdatesMode,
+      updatesCenterLoadingVisible
+    }),
+    serverSyncFooter
+  );
+  const uiLocked = busy || updateAllBusy;
   const deleteBusy = deletingModKeys.size > 0;
   const deleteConfirmMessage =
     deleteConfirmFreshMods.length === 1
@@ -1192,10 +1502,12 @@ function App() {
       searchSource={catalogSource}
       filter={filter}
       settingsOpen={settingsOpen}
-      busy={busy}
+      busy={busy || updateAllBusy}
+      updatesLoading={updatesLoadingVisible}
+      updatesStatus={updatesStatus}
       onQueryChange={setQuery}
       onClearQuery={clearCatalogQuery}
-      onToggleSearchSource={toggleSearchSource}
+      onToggleSearchSource={handleToggleSearchSource}
       onFilterChange={setFilter}
       onOpenSettings={() => setSettingsOpen(true)}
     />
@@ -1228,8 +1540,28 @@ function App() {
                 : null
             }
           />
+          <NoticeModal
+            tone="bad"
+            message={updateConfirmMessage}
+            onClose={() => setUpdateConfirm(null)}
+            confirm={
+              updateConfirm
+                ? {
+                    busy: updateConfirmBusy,
+                    confirmLabel: updateConfirmBusy ? 'Обновление…' : 'Обновить',
+                    cancelLabel: 'Отмена',
+                    onConfirm: confirmPendingUpdate,
+                    onCancel: () => setUpdateConfirm(null)
+                  }
+                : null
+            }
+          />
 
-          <section className={`workspace${catalogMode ? ' workspaceCatalog' : ''}`}>
+          <section
+            className={`workspace${catalogMode && (!isUpdatesMode || !showUpdatesPanel) ? ' workspaceCatalog' : ''}${
+              showUpdatesPanel ? ' workspaceUpdates' : ''
+            }`}
+          >
             {catalogMode ? (
               <div className="catalogSearchWrap">
                 <CatalogSearchPanel
@@ -1238,9 +1570,39 @@ function App() {
                   results={catalogResults}
                   loading={catalogLoading}
                   error={catalogError}
+                  updatesBlocked={catalogUpdatesBlocked}
+                  updatesCheckedAtMs={updatesInitBlocked || !updatesReady ? null : updatesCheckedAtMs}
+                  updatesReady={updatesReady && !updatesInitBlocked}
+                  updatesLoading={updatesLoadingVisible}
                   query={query}
                   installedProjectIds={catalogInstalledProjectIds}
-                  onSelect={selectCatalogCandidate}
+                  modForItem={catalogModForItem}
+                  selectedKey={isUpdatesMode ? selected?.key : null}
+                  selectedKeys={isUpdatesMode ? selectedKeys : null}
+                  onSelect={(item, event) => {
+                    if (catalogSource === 'updates') {
+                      const mod = modsByKey.get(item.key ?? item.id);
+                      if (mod) handleTableSelect(mod, event);
+                      return;
+                    }
+                    selectCatalogCandidate(item);
+                  }}
+                  onSelectDrag={
+                    isUpdatesMode
+                      ? (item, select, options) => {
+                          const mod = modsByKey.get(item.key ?? item.id);
+                          if (mod) handleTableSelectDrag(mod, select, options);
+                        }
+                      : undefined
+                  }
+                  onContextMenu={
+                    isUpdatesMode
+                      ? (item, event) => {
+                          const mod = modsByKey.get(item.key ?? item.id);
+                          if (mod) handleModContextMenu(mod, event);
+                        }
+                      : undefined
+                  }
                 />
               </div>
             ) : (
@@ -1260,14 +1622,38 @@ function App() {
                 onDescriptionClick={(mod) => setDescriptionKey(mod.key)}
               />
             )}
+            {!showAside ? null : (
             <aside>
-              {catalogMode ? (
-                <div className="empty">Выбери мод из каталога</div>
-              ) : selected ? (
+              {showUpdatesPanel ? (
+                <UpdatesVersionPanel
+                  mod={updatesSelectedMod}
+                  cacheScope={settings?.instanceRoot}
+                  busy={busy || updateAllBusy || Boolean(updateInstallVersionId)}
+                  updateCount={updatesCandidates.length}
+                  updatingAll={updateAllBusy}
+                  updatesLoading={updatesLoadingVisible}
+                  updateAllError={updateAllError}
+                  installingVersionId={updateInstallVersionId}
+                  onUpdateAllRequest={() => {
+                    if (updatesCandidates.length && !busy && !updateAllBusy) {
+                      setUpdateConfirm({ scope: 'all' });
+                    }
+                  }}
+                  onInstallRequest={(version) => {
+                    if (!updatesSelectedMod || busy || updateAllBusy || updateInstallVersionId) return;
+                    setUpdateConfirm({ scope: 'single', mod: updatesSelectedMod, version });
+                  }}
+                  onClearMod={() => {
+                    if (busy || updateAllBusy || updateInstallVersionId) return;
+                    setSelected(null);
+                    setSelectedKeys(new Set());
+                  }}
+                />
+              ) : selected && !isUpdatesMode ? (
                 <ModEditor
                   mod={selected}
                   mods={mods}
-                  busy={busy}
+                  busy={busy || updateAllBusy}
                   onPatch={patchMod}
                   onUploadCover={handleUploadCover}
                   onDeleteCover={handleDeleteCover}
@@ -1284,6 +1670,7 @@ function App() {
                 <div className="empty">Выбери мод в списке</div>
               )}
             </aside>
+            )}
           </section>
         </>
       ) : (
@@ -1301,32 +1688,45 @@ function App() {
         menu={modContextMenu}
         count={contextMenuMods.length}
         label={contextMenuLabel}
-        busy={busy || deleteBusy}
+        busy={busy || deleteBusy || updateConfirmBusy}
         onClose={closeModContextMenu}
         onCopy={handleContextCopyMods}
         onOpenPage={contextMenuPageUrl ? handleContextOpenPage : undefined}
+        onUpdate={modContextMenu?.mode === 'updates' ? handleContextUpdateMods : undefined}
         onDelete={handleContextDeleteMods}
       />
 
-      {showProgress ? (
+      {workspaceFooter.show ? (
         <footer className="prefetchProgressWrap">
-          <div className="prefetchProgressTrack" aria-hidden="true">
-            <div
-              className={`prefetchProgressBar${progressIndeterminate ? ' indeterminate' : ''}`}
-              style={progressIndeterminate ? undefined : { width: `${progressPercent}%` }}
-            />
-          </div>
+          {workspaceFooter.trackActive ? (
+            <div className="prefetchProgressTrack" aria-hidden="true">
+              {workspaceFooter.scopedProgress ? (
+                <div
+                  className="prefetchProgressScope"
+                  style={{ width: `${workspaceFooter.percent}%` }}
+                >
+                  <div className="prefetchProgressBar indeterminate" />
+                </div>
+              ) : workspaceFooter.indeterminate ? (
+                <div className="prefetchProgressBar indeterminate" />
+              ) : null}
+            </div>
+          ) : null}
           <div className="prefetchProgressRow">
-            <p className="prefetchProgressLabel">{progressLabel}</p>
-            <button
-              type="button"
-              className="prefetchProgressCancel"
-              onClick={handleCancelProgress}
-              aria-label="Отменить"
-              title="Отменить"
-            >
-              <X size={14} strokeWidth={2} />
-            </button>
+            <p className={`prefetchProgressLabel${workspaceFooter.labelWarn ? ' prefetchProgressLabel--warn' : ''}`}>
+              {workspaceFooter.label}
+            </p>
+            {workspaceFooter.cancelable ? (
+              <button
+                type="button"
+                className="prefetchProgressCancel"
+                onClick={handleCancelProgress}
+                aria-label="Отменить"
+                title="Отменить"
+              >
+                <X size={14} strokeWidth={2} />
+              </button>
+            ) : null}
           </div>
         </footer>
       ) : null}
@@ -1337,8 +1737,12 @@ function App() {
           busy={uiLocked}
           syncing={syncing}
           updater={updater}
+          serverSync={serverSync}
+          tab={settingsTab}
+          onTabChange={setSettingsTab}
           onClose={() => setSettingsOpen(false)}
           onSave={handleSaveSettings}
+          onSettingsSaved={setSettings}
           onRunSync={handleRunSync}
           onClearData={handleClearData}
         />
@@ -1359,7 +1763,7 @@ function App() {
       <CatalogInstallDialog
         candidate={catalogInstallSelection?.candidate}
         source={catalogInstallSelection?.source}
-        busy={busy}
+        busy={busy || updateAllBusy}
         cacheScope={settings?.instanceRoot}
         alreadyInstalled={catalogInstallAlreadyInstalled}
         installedStateKey={catalogInstallInstalledStateKey}
@@ -1370,7 +1774,7 @@ function App() {
       <ProviderDialog
         mod={providerMod}
         modNav={providerMod ? modModalNav(providerMod) : undefined}
-        busy={busy}
+        busy={busy || updateAllBusy}
         curseforgeApiKeySet={settings?.curseforgeApiKeySet}
         onClose={() => !busy && setProviderKey(null)}
         onApplied={handleProviderApplied}
@@ -1379,7 +1783,8 @@ function App() {
       <VersionDialog
         mod={versionMod}
         modNav={versionMod ? modModalNav(versionMod) : undefined}
-        busy={busy}
+        busy={busy || updateAllBusy}
+        cacheScope={settings?.instanceRoot}
         onClose={() => !busy && setVersionKey(null)}
         onInstalled={handleVersionInstalled}
       />
@@ -1401,7 +1806,7 @@ function App() {
         mod={descriptionMod}
         modNav={descriptionMod ? modModalNav(descriptionMod) : undefined}
         savingKey={descriptionSavingKey}
-        busy={busy}
+        busy={busy || updateAllBusy}
         onClose={() => {
           if (busy) return;
           setDescriptionKey(null);

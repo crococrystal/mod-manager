@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Copy, ExternalLink, Trash2 } from 'lucide-react';
+import { Copy, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
 import { getModalPortalRoot } from '../../lib/modalPortal.js';
 
 const EDGE_PADDING = 8;
@@ -13,6 +13,7 @@ export function ModContextMenu({
   onClose,
   onCopy,
   onOpenPage,
+  onUpdate,
   onDelete
 }) {
   const menuRef = useRef(null);
@@ -89,6 +90,12 @@ export function ModContextMenu({
           <Trash2 size={15} />
           {count > 1 ? 'Удалить выбранные' : 'Удалить мод'}
         </button>
+        {onUpdate ? (
+          <button type="button" role="menuitem" onClick={onUpdate} disabled={busy}>
+            <RefreshCw size={15} />
+            {count > 1 ? 'Обновить выбранные' : 'Обновить мод'}
+          </button>
+        ) : null}
       </div>
     </div>,
     getModalPortalRoot()

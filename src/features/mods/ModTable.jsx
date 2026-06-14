@@ -1,6 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useRef } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { formatDate } from '../../lib/modMeta.jsx';
+import { useSelectedListDock } from '../../hooks/useSelectedListDock.js';
+import { useTableDragSelect } from '../../hooks/useTableDragSelect.js';
 import { ModCover } from './ModCover.jsx';
 import { SourceIcon, TagMark } from './ModBadges.jsx';
 
@@ -20,11 +22,6 @@ function canChangeVersion(mod) {
     (mod.source === 'modrinth' && mod.modrinthId) ||
       (mod.source === 'curseforge' && mod.curseforgeId)
   );
-}
-
-function isInteractiveTableTarget(target) {
-  return target instanceof HTMLElement
-    && Boolean(target.closest('button, a, input, textarea, select, [role="button"]'));
 }
 
 function ModRowCells({
@@ -111,7 +108,7 @@ function SelectedModDock({
   return (
     <div
       ref={dockRef}
-      className="selectedModDock"
+      className="selectedModDock selectedListDock"
       aria-hidden="true"
     >
       <table>
@@ -153,173 +150,32 @@ export function ModTable({
 }) {
   const wrapRef = useRef(null);
   const selectedDockRef = useRef(null);
-  const [dragSelecting, setDragSelecting] = useState(false);
-  const dockFrameRef = useRef(0);
-  const dragSelectRef = useRef({
-    active: false,
-    dragged: false,
-    visited: new Set(),
-    startMod: null
+
+  const { dragSelecting, handleRowMouseDown, handleRowMouseEnter, handleRowClick } = useTableDragSelect({
+    wrapRef,
+    onSelectDrag
   });
 
-  useLayoutEffect(() => {
-    const wrap = wrapRef.current;
-    if (!selected?.filename || !wrap) return;
+  const rowSelector = useCallback(
+    (wrap) => {
+      if (!selected?.filename) return null;
+      return wrap.querySelector(`tr[data-filename="${CSS.escape(selected.filename)}"]`);
+    },
+    [selected?.filename]
+  );
 
-    const row = wrap.querySelector(`tr[data-filename="${CSS.escape(selected.filename)}"]`);
-    if (!row) return;
+  const topLimitSelector = useCallback((wrap) => wrap.querySelector('th'), []);
 
-    const headCell = wrap.querySelector('th');
-    const wrapRect = wrap.getBoundingClientRect();
-    const rowRect = row.getBoundingClientRect();
-    const topLimit = (headCell?.getBoundingClientRect().bottom ?? wrapRect.top + 36) + 1;
-    const bottomLimit = wrapRect.bottom;
-
-    if (rowRect.top < topLimit) {
-      wrap.scrollTop -= topLimit - rowRect.top;
-    } else if (rowRect.bottom > bottomLimit) {
-      wrap.scrollTop += rowRect.bottom - bottomLimit;
-    }
-  }, [selected?.filename]);
-
-  useLayoutEffect(() => {
-    const wrap = wrapRef.current;
-    const dock = selectedDockRef.current;
-    if (!wrap || !dock || !selected?.filename) {
-      if (dock) dock.classList.remove('selectedModDockVisible', 'selectedModDockTop', 'selectedModDockBottom');
-      return undefined;
-    }
-
-    let currentPlacement = null;
-
-    function setDockPlacement(placement) {
-      if (currentPlacement === placement) return;
-      currentPlacement = placement;
-      dock.classList.toggle('selectedModDockVisible', Boolean(placement));
-      dock.classList.toggle('selectedModDockTop', placement === 'top');
-      dock.classList.toggle('selectedModDockBottom', placement === 'bottom');
-    }
-
-    function updateSelectedDock() {
-      dockFrameRef.current = 0;
-
-      const row = wrap.querySelector(`tr[data-filename="${CSS.escape(selected.filename)}"]`);
-      const headCell = wrap.querySelector('th');
-      if (!row) {
-        setDockPlacement(null);
-        return;
-      }
-
-      const wrapRect = wrap.getBoundingClientRect();
-      const rowRect = row.getBoundingClientRect();
-      const topLimit = headCell?.getBoundingClientRect().bottom ?? wrapRect.top + 36;
-      const bottomLimit = wrapRect.bottom;
-      let placement = null;
-
-      if (rowRect.top < topLimit) {
-        placement = 'top';
-      } else if (rowRect.bottom > bottomLimit) {
-        placement = 'bottom';
-      }
-
-      if (!placement) {
-        setDockPlacement(null);
-        return;
-      }
-
-      const rowHeight = Math.max(1, Math.round(rowRect.height));
-      const x = Math.round(wrapRect.left);
-      const y = placement === 'top'
-        ? Math.round(topLimit - 1)
-        : Math.round(bottomLimit - rowHeight);
-
-      dock.style.width = `${Math.round(wrap.clientWidth)}px`;
-      dock.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-      setDockPlacement(placement);
-    }
-
-    function scheduleSelectedDockUpdate() {
-      if (dockFrameRef.current) return;
-      dockFrameRef.current = window.requestAnimationFrame(updateSelectedDock);
-    }
-
-    updateSelectedDock();
-    wrap.addEventListener('scroll', scheduleSelectedDockUpdate, { passive: true });
-    window.addEventListener('resize', scheduleSelectedDockUpdate);
-
-    const resizeObserver = new ResizeObserver(scheduleSelectedDockUpdate);
-    resizeObserver.observe(wrap);
-
-    return () => {
-      wrap.removeEventListener('scroll', scheduleSelectedDockUpdate);
-      window.removeEventListener('resize', scheduleSelectedDockUpdate);
-      resizeObserver.disconnect();
-      setDockPlacement(null);
-      if (dockFrameRef.current) {
-        window.cancelAnimationFrame(dockFrameRef.current);
-        dockFrameRef.current = 0;
-      }
-    };
-  }, [mods, selected?.filename]);
-
-  useEffect(() => {
-    function handleMouseUp() {
-      dragSelectRef.current.active = false;
-      setDragSelecting(false);
-    }
-
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => window.removeEventListener('mouseup', handleMouseUp);
-  }, []);
-
-  useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap || !dragSelecting) return undefined;
-
-    function handleWheel(event) {
-      event.preventDefault();
-    }
-
-    wrap.addEventListener('wheel', handleWheel, { passive: false });
-    return () => wrap.removeEventListener('wheel', handleWheel);
-  }, [dragSelecting]);
-
-  function handleRowMouseDown(mod, event) {
-    if (event.button !== 0 || isInteractiveTableTarget(event.target)) return;
-
-    setDragSelecting(true);
-    dragSelectRef.current = {
-      active: true,
-      dragged: false,
-      visited: new Set(),
-      startMod: mod
-    };
-  }
-
-  function handleRowMouseEnter(mod, event) {
-    const state = dragSelectRef.current;
-    if (!state.active || !(event.buttons & 1) || !onSelectDrag) return;
-
-    if (!state.dragged) {
-      state.dragged = true;
-      if (state.startMod && !state.visited.has(state.startMod.key)) {
-        state.visited.add(state.startMod.key);
-        onSelectDrag(state.startMod, true, { reset: true });
-      }
-    }
-
-    if (state.visited.has(mod.key)) return;
-    state.visited.add(mod.key);
-    onSelectDrag(mod, true);
-  }
-
-  function handleRowClick(mod, event) {
-    if (dragSelectRef.current.dragged) {
-      dragSelectRef.current.dragged = false;
-      return;
-    }
-    onSelect(mod, event);
-  }
+  useSelectedListDock({
+    active: Boolean(selected?.filename),
+    wrapRef,
+    dockRef: selectedDockRef,
+    rowSelector,
+    topLimitSelector,
+    fallbackTopInset: 36,
+    scrollIntoViewKey: selected?.filename ?? null,
+    deps: [mods, selected?.filename]
+  });
 
   return (
     <>
@@ -349,7 +205,7 @@ export function ModTable({
                   className={active ? 'selected' : ''}
                   onMouseDown={(event) => handleRowMouseDown(mod, event)}
                   onMouseEnter={(event) => handleRowMouseEnter(mod, event)}
-                  onClick={(event) => handleRowClick(mod, event)}
+                  onClick={(event) => handleRowClick(mod, event, onSelect)}
                   onContextMenu={(event) => onContextMenu?.(mod, event)}
                 >
                   <ModRowCells

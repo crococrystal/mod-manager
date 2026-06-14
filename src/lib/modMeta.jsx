@@ -1,4 +1,4 @@
-import { BookOpen, Globe2, Monitor, Server, Wrench } from 'lucide-react';
+import { BookOpen, CheckCircle2, Globe2, Monitor, Server, Wrench } from 'lucide-react';
 import curseforgeIcon from '../assets/curseforge-icon.svg';
 import externalIcon from '../assets/external-icon.svg';
 import modrinthIcon from '../assets/modrinth-icon.svg';
@@ -31,6 +31,28 @@ export function formatDate(value) {
     hour: '2-digit',
     minute: '2-digit'
   }).format(new Date(value));
+}
+
+export function formatUpdatesCheckedAt(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const day = date.getDate();
+  const month = date.toLocaleDateString('ru', { month: 'long' });
+  const time = date.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+  return `${day} ${month} ${time}`;
+}
+
+export function UpdatesCurrentState({ checkedAtMs }) {
+  const checkedLabel = formatUpdatesCheckedAt(checkedAtMs);
+
+  return (
+    <div className="catalogSearchState">
+      <CheckCircle2 size={48} strokeWidth={1.75} aria-hidden />
+      <span>Все моды обновлены до актуальных версий</span>
+      {checkedLabel ? <small className="catalogSearchStateMeta">Обновлено: {checkedLabel}</small> : null}
+    </div>
+  );
 }
 
 /** Small line above mod name in modals. With section — only the label; without — provider · MC · loader. */

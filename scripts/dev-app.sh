@@ -11,4 +11,7 @@ if [ "${PREVIEW_WINDOWS_CHROME:-}" = "1" ] || [ "${VITE_PREVIEW_WINDOWS_CHROME:-
   export VITE_PREVIEW_WINDOWS_CHROME=true
 fi
 
+# Keep Rust artifacts under this checkout (avoids stale permission files from another path).
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/src-tauri/target}"
+
 exec npx tauri dev "$@"

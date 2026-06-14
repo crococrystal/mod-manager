@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Folder, FolderOpen, HardDrive, Info, RefreshCw, Settings2, Trash2, TriangleAlert } from 'lucide-react';
+import { Folder, FolderOpen, HardDrive, Info, RefreshCw, Server, Settings2, Trash2, TriangleAlert } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { Button } from '../../components/Button.jsx';
+import { Button, IconButton } from '../../components/Button.jsx';
 import { Modal } from '../../components/Modal.jsx';
 import { canCheckForUpdates } from '../../lib/updater.js';
+import { openFolderPath, resolveInstanceExplorerPath } from '../../lib/openFolderPath.js';
 import { getDataUsage, clearAppData } from '../../api.js';
+import { ServerSyncSettingsPanel } from '../server-sync/ServerSyncSettingsPanel.jsx';
+import { appendServerSyncFields } from '../server-sync/serverSyncSettings.js';
 
 function toSettings(draft) {
-  return {
-    instanceRoot: draft.instanceRoot || null,
-    curseforgeApiKey: draft.curseforgeApiKey ?? '',
-    autoPrefetchCovers: true,
-    autoPrefetchDependencies: true,
-    autoCheckUpdates: draft.autoCheckUpdates ?? true,
-    recentInstances: draft.recentInstances ?? []
-  };
+  return appendServerSyncFields(
+    {
+      instanceRoot: draft.instanceRoot || null,
+      curseforgeApiKey: draft.curseforgeApiKey ?? '',
+      autoPrefetchCovers: true,
+      autoPrefetchDependencies: true,
+      autoCheckUpdates: draft.autoCheckUpdates ?? true,
+      recentInstances: draft.recentInstances ?? []
+    },
+    draft
+  );
 }
 
 function instanceNameFromPath(path) {
@@ -53,8 +59,20 @@ function formatBytes(bytes) {
   return `${gb.toFixed(2)} GB`;
 }
 
-export function SettingsDialog({ settings, busy, syncing = false, onClose, onSave, onRunSync, onClearData, updater }) {
-  const [tab, setTab] = useState('general');
+export function SettingsDialog({
+  settings,
+  busy,
+  syncing = false,
+  onClose,
+  onSave,
+  onSettingsSaved,
+  onRunSync,
+  onClearData,
+  updater,
+  tab,
+  onTabChange,
+  serverSync
+}) {
   const [draft, setDraft] = useState(() => settings ?? {});
   const [message, setMessage] = useState('');
   const wasSyncingRef = useRef(false);
@@ -126,6 +144,13 @@ export function SettingsDialog({ settings, busy, syncing = false, onClose, onSav
     setMessage('');
     await onSave(toSettings(next), { bootstrap: true });
     onClose?.();
+  }
+
+  async function openInstanceFolder() {
+    const path = resolveInstanceExplorerPath(draft.instanceRoot, settings?.modsDir);
+    if (!path) return;
+    const ok = await openFolderPath(path);
+    if (!ok) setMessage('Не удалось открыть папку');
   }
 
   async function useRecent(path) {
@@ -202,17 +227,27 @@ export function SettingsDialog({ settings, busy, syncing = false, onClose, onSav
             role="tab"
             aria-selected={tab === 'general'}
             className={`settingsTab${tab === 'general' ? ' settingsTab--active' : ''}`}
-            onClick={() => setTab('general')}
+            onClick={() => onTabChange?.('general')}
           >
             <Settings2 size={16} className="settingsTabIcon" aria-hidden="true" />
-            <span className="settingsTabLabel">Основные настройки</span>
+            <span className="settingsTabLabel">Основные</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'server'}
+            className={`settingsTab${tab === 'server' ? ' settingsTab--active' : ''}`}
+            onClick={() => onTabChange?.('server')}
+          >
+            <Server size={16} className="settingsTabIcon" aria-hidden="true" />
+            <span className="settingsTabLabel">Сервер</span>
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={tab === 'data'}
             className={`settingsTab${tab === 'data' ? ' settingsTab--active' : ''}`}
-            onClick={() => setTab('data')}
+            onClick={() => onTabChange?.('data')}
           >
             <HardDrive size={16} className="settingsTabIcon" aria-hidden="true" />
             <span className="settingsTabLabel">Данные</span>
@@ -255,7 +290,13 @@ export function SettingsDialog({ settings, busy, syncing = false, onClose, onSav
                 readOnly
                 placeholder="/Users/.../minecraft/mods или папка сборки"
               />
-              <Button icon={FolderOpen} onClick={pickFolder} disabled={packLocked}>
+              <IconButton
+                icon={FolderOpen}
+                label="Открыть папку"
+                onClick={openInstanceFolder}
+                disabled={packLocked || !draft.instanceRoot?.trim()}
+              />
+              <Button icon={Folder} onClick={pickFolder} disabled={packLocked}>
                 Выбрать
               </Button>
             </div>
@@ -352,6 +393,13 @@ export function SettingsDialog({ settings, busy, syncing = false, onClose, onSav
 
           {message ? <p className="settingsMessage">{message}</p> : null}
         </div>
+      ) : tab === 'server' ? (
+        <ServerSyncSettingsPanel
+          settings={settings}
+          disabled={packLocked}
+          onSettingsSaved={onSettingsSaved}
+          serverSync={serverSync}
+        />
       ) : (
         <div className="settingsData">
           <section className="settingsBlock">

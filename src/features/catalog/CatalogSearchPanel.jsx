@@ -1,11 +1,30 @@
+import { useCallback, useMemo, useRef } from 'react';
 import { Check, LoaderCircle } from 'lucide-react';
 import { ModCover } from '../mods/ModCover.jsx';
-import { sourceIcons } from '../../lib/modMeta.jsx';
+import { sourceIcons, UpdatesCurrentState } from '../../lib/modMeta.jsx';
+import { useSelectedListDock } from '../../hooks/useSelectedListDock.js';
+import { useTableDragSelect } from '../../hooks/useTableDragSelect.js';
 
 function formatInstanceTarget(target) {
   if (!target) return '';
   const parts = [target.minecraftVersion, target.loader].filter(Boolean);
   return parts.join(' · ');
+}
+
+function UpdateRowCells({ item, modForItem }) {
+  const coverMod = modForItem?.(item) ?? { coverUrl: item.iconUrl, displayName: item.title };
+
+  return (
+    <>
+      <td className="coverCell" onClick={(event) => event.stopPropagation()}>
+        <ModCover mod={coverMod} />
+      </td>
+      <td>
+        <strong>{item.title}</strong>
+        {item.summary ? <small>{item.summary}</small> : null}
+      </td>
+    </>
+  );
 }
 
 export function CatalogSearchPanel({
@@ -16,18 +35,84 @@ export function CatalogSearchPanel({
   error,
   query,
   installedProjectIds,
-  onSelect
+  modForItem,
+  selectedKey,
+  selectedKeys,
+  updatesCheckedAtMs = null,
+  updatesReady = false,
+  updatesLoading = false,
+  updatesBlocked = false,
+  onSelect,
+  onSelectDrag,
+  onContextMenu
 }) {
-  const providerLabel = sourceIcons[source]?.label ?? 'Каталог';
+  const isUpdates = source === 'updates';
+  const providerLabel = isUpdates ? 'Обновления' : (sourceIcons[source]?.label ?? 'Каталог');
   const targetLabel = formatInstanceTarget(target);
-  const isPopular = !query.trim();
+  const isPopular = !isUpdates && !query.trim();
   const showList = results.length > 0;
+  const showUpdatesLoadingCenter = isUpdates && loading && !showList;
+  const listRef = useRef(null);
+  const selectedDockRef = useRef(null);
 
-  if (loading && !showList) {
+  const { dragSelecting, handleRowMouseDown, handleRowMouseEnter, handleRowClick } = useTableDragSelect({
+    enabled: isUpdates,
+    wrapRef: listRef,
+    onSelectDrag,
+    getItemKey: (item) => item?.key ?? item?.id
+  });
+
+  const selectedItem = useMemo(() => {
+    if (!isUpdates || !selectedKey) return null;
+    return results.find((item) => (item.key ?? item.id) === selectedKey) ?? null;
+  }, [isUpdates, results, selectedKey]);
+
+  const rowSelector = useCallback(
+    (wrap) => {
+      if (!selectedKey) return null;
+      return wrap.querySelector(`tr[data-update-key="${CSS.escape(selectedKey)}"]`);
+    },
+    [selectedKey]
+  );
+
+  const topLimitSelector = useCallback(
+    (wrap) => wrap.parentElement?.querySelector('.catalogSearchTargetBar'),
+    []
+  );
+
+  useSelectedListDock({
+    active: isUpdates && Boolean(selectedKey),
+    wrapRef: listRef,
+    dockRef: selectedDockRef,
+    rowSelector,
+    topLimitSelector,
+    scrollIntoViewKey: isUpdates ? selectedKey : null,
+    deps: [results, selectedKey]
+  });
+
+  if (isUpdates && updatesBlocked) {
+    if (updatesLoading) {
+      return (
+        <div className="catalogSearchState">
+          <LoaderCircle className="spin" size={28} />
+          <span>Проверка обновлений модов…</span>
+        </div>
+      );
+    }
+    return <div className="catalogSearchPanel" aria-busy="true" />;
+  }
+
+  if (showUpdatesLoadingCenter || (loading && !showList && !isUpdates)) {
     return (
       <div className="catalogSearchState">
         <LoaderCircle className="spin" size={28} />
-        <span>{isPopular ? `Загрузка модов ${providerLabel}…` : `Поиск на ${providerLabel}…`}</span>
+        <span>
+          {isUpdates
+            ? 'Проверка обновлений модов…'
+            : isPopular
+            ? `Загрузка модов ${providerLabel}…`
+            : `Поиск на ${providerLabel}…`}
+        </span>
       </div>
     );
   }
@@ -37,44 +122,102 @@ export function CatalogSearchPanel({
   }
 
   if (!showList && !loading) {
+    if (isUpdates && query.trim()) {
+      return (
+        <p className="catalogSearchState">
+          {`Ничего не найдено${targetLabel ? ` для ${targetLabel}` : ''}.`}
+        </p>
+      );
+    }
+    if (isUpdates && updatesReady && updatesCheckedAtMs && !updatesLoading && !updatesBlocked) {
+      return <UpdatesCurrentState checkedAtMs={updatesCheckedAtMs} />;
+    }
     return (
       <p className="catalogSearchState">
-        {isPopular ? 'Не удалось загрузить список модов.' : `Ничего не найдено${targetLabel ? ` для ${targetLabel}` : ''}.`}
+        {isUpdates
+          ? `Обновлений не найдено${targetLabel ? ` для ${targetLabel}` : ''}.`
+          : isPopular
+          ? 'Не удалось загрузить список модов.'
+          : `Ничего не найдено${targetLabel ? ` для ${targetLabel}` : ''}.`}
       </p>
     );
   }
 
   return (
     <>
-      <p className="catalogSearchTargetBar">
-        {isPopular ? 'Популярные' : 'Результаты'}
-        {targetLabel ? ` · ${targetLabel}` : ''}
-      </p>
-      <ul className="catalogSearchList">
-        {results.map((item) => {
-          const installed = installedProjectIds?.has(String(item.id));
-          return (
-            <li key={item.id}>
-              <button type="button" className="catalogSearchRow" onClick={() => onSelect(item)}>
-                <ModCover mod={{ coverUrl: item.iconUrl, displayName: item.title }} size="tile" />
-                <span className="catalogSearchText">
-                  <span className="catalogSearchTitleLine">
-                    <strong>{item.title}</strong>
-                    {installed ? <Check className="catalogSearchInstalledIcon" size={14} aria-label="Установлен" /> : null}
-                  </span>
-                  {item.summary ? <small>{item.summary}</small> : null}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      {loading ? (
-        <div className="catalogSearchLoadingMore">
-          <LoaderCircle className="spin" size={16} />
+      <div className="catalogSearchPanel">
+        <p className="catalogSearchTargetBar">
+          {isUpdates ? 'Доступны обновления' : isPopular ? 'Популярные' : 'Результаты'}
+          {targetLabel ? ` · ${targetLabel}` : ''}
+        </p>
+        {isUpdates ? (
+          <div
+            ref={listRef}
+            className={`tableWrap scrollArea${dragSelecting ? ' tableWrapDragSelecting' : ''}`}
+          >
+            <table className="updatesModTable">
+              <tbody>
+                {results.map((item) => {
+                  const itemKey = item.key ?? item.id;
+                  const selected = selectedKeys?.has(itemKey);
+
+                  return (
+                    <tr
+                      key={item.id}
+                      data-update-key={itemKey}
+                      className={selected ? 'selected' : ''}
+                      onMouseDown={(event) => handleRowMouseDown(item, event)}
+                      onMouseEnter={(event) => handleRowMouseEnter(item, event)}
+                      onClick={(event) => handleRowClick(item, event, onSelect)}
+                      onContextMenu={(event) => onContextMenu?.(item, event)}
+                    >
+                      <UpdateRowCells item={item} modForItem={modForItem} />
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <ul ref={listRef} className="catalogSearchList scrollArea">
+            {results.map((item) => {
+              const installed = installedProjectIds?.has(String(item.id));
+              const coverMod =
+                modForItem?.(item) ?? { coverUrl: item.iconUrl, displayName: item.title };
+
+              return (
+                <li key={item.id}>
+                  <button type="button" className="catalogSearchRow" onClick={() => onSelect(item)}>
+                    <ModCover mod={coverMod} size="tile" />
+                    <span className="catalogSearchText">
+                      <span className="catalogSearchTitleLine">
+                        <strong>{item.title}</strong>
+                        {installed ? (
+                          <span className="catalogSearchInstalled">
+                            <Check size={14} strokeWidth={2.5} aria-hidden />
+                          </span>
+                        ) : null}
+                      </span>
+                      {item.summary ? <small>{item.summary}</small> : null}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+      {isUpdates && selectedItem ? (
+        <div ref={selectedDockRef} className="selectedListDock updatesSelectedDock" aria-hidden="true">
+          <table className="updatesModTable">
+            <tbody>
+              <tr className="selected">
+                <UpdateRowCells item={selectedItem} modForItem={modForItem} />
+              </tr>
+            </tbody>
+          </table>
         </div>
       ) : null}
-      {error ? <p className="catalogSearchError">{error}</p> : null}
     </>
   );
 }

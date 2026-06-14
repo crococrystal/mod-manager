@@ -46,6 +46,12 @@ export function searchProviderCandidates({ source, displayName, filename }) {
   });
 }
 
+export function checkModUpdates({ forceRefresh = false } = {}) {
+  return invoke('check_mod_updates', {
+    request: { forceRefresh }
+  });
+}
+
 export function searchProviderCatalog({ source, query }) {
   return invoke('search_provider_catalog', {
     request: { source, query }

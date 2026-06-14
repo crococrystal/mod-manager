@@ -24,9 +24,9 @@ use crate::provider_labels::{
 use crate::providers::{
     CatalogInstallPreview, CatalogInstallPreviewRequest, CatalogInstallRequest,
     CatalogInstallResult, CatalogProjectDetails, CatalogProjectDetailsRequest,
-    CatalogSearchRequest, CatalogSearchResponse, InstallProviderVersionRequest,
-    InstallProviderVersionResult, ListProviderVersionsRequest, ProviderVersionsPayload,
-    SearchProviderRequest, SwitchModSourceRequest, SwitchModSourceResult,
+    CatalogSearchRequest, CatalogSearchResponse, CheckModUpdatesRequest, CheckModUpdatesResponse,
+    InstallProviderVersionRequest, InstallProviderVersionResult, ListProviderVersionsRequest,
+    ProviderVersionsPayload, SearchProviderRequest, SwitchModSourceRequest, SwitchModSourceResult,
 };
 use crate::remote::ProviderCandidate;
 use crate::remote::{fetch_api_dependencies, http_client};
@@ -559,7 +559,30 @@ pub(crate) async fn install_provider_version(
     app: AppHandle,
     request: InstallProviderVersionRequest,
 ) -> Result<InstallProviderVersionResult, String> {
-    crate::providers::install_version(app, request).await
+    let key = request.key.clone();
+    let previous_filename = request.filename.clone();
+    let result = crate::providers::install_version(app.clone(), request).await?;
+    crate::server_sync::schedule_sync_mod(
+        &app,
+        &key,
+        &result.filename,
+        Some(previous_filename),
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+pub(crate) async fn check_mod_updates(
+    app: AppHandle,
+    request: CheckModUpdatesRequest,
+) -> Result<CheckModUpdatesResponse, String> {
+    let force_refresh = request.force_refresh;
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::providers::check_mod_updates_blocking(&app_handle, force_refresh)
+    })
+    .await
+    .map_err(|error| format!("Проверка обновлений прервана: {error}"))?
 }
 
 #[tauri::command]
@@ -591,7 +614,9 @@ pub(crate) async fn install_from_catalog(
     app: AppHandle,
     request: CatalogInstallRequest,
 ) -> Result<CatalogInstallResult, String> {
-    crate::providers::install_from_catalog(app, request).await
+    let result = crate::providers::install_from_catalog(app.clone(), request).await?;
+    crate::server_sync::schedule_sync_keys(&app, &result.installed_keys);
+    Ok(result)
 }
 
 #[tauri::command]

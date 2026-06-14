@@ -360,6 +360,9 @@ pub(crate) fn scan_mods_for_settings(
             let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
                 continue;
             };
+            if filename.starts_with(".mod-manager-download-") {
+                continue;
+            }
             jars_by_filename
                 .entry(filename.to_string())
                 .or_default()
