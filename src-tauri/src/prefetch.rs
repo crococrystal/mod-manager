@@ -16,13 +16,15 @@ use crate::events::{
 use crate::file_identity::read_file_identity;
 use crate::mods::{merge_keys, scan_mods_for_settings};
 use crate::provider_labels::{
-    build_curseforge_labels, build_modrinth_labels, provider_tags_for, refresh_result_for,
+    build_curseforge_labels, build_modrinth_labels, curseforge_side_is_ambiguous,
+    finalize_curseforge_labels, link_modrinth_ids_for_curseforge_mods, provider_tags_for,
+    refresh_result_for,
 };
 use crate::remote::{
     curseforge_cover_url_from_payload, curseforge_dependencies_from_payload,
-    curseforge_files_batch, curseforge_fingerprint_matches, curseforge_mod_info,
+    curseforge_files_batch, curseforge_fingerprint_matches, curseforge_get, curseforge_mod_info,
     curseforge_mods_batch, http_client, modrinth_cover_url_from_payload,
-    modrinth_dependencies_from_payload, modrinth_projects_batch, modrinth_search_icon,
+    modrinth_dependencies_from_payload, modrinth_project, modrinth_projects_batch, modrinth_search_icon,
     modrinth_versions_batch, modrinth_versions_by_sha512,
 };
 use crate::settings::{resolve_paths, Settings};
@@ -105,7 +107,19 @@ pub(crate) fn identify_unknown_sources(
             tag.source = "curseforge".to_string();
             tag.curseforge_id = found.project_id.clone();
             tag.curseforge_file_id = found.file_id.clone();
-            tag.curseforge_slug = slug;
+            tag.curseforge_slug = slug.clone();
+            if tag.modrinth_id.is_empty() && !slug.is_empty() {
+                if let Some(project) = modrinth_project(client, &slug) {
+                    if let Some(project_id) = project
+                        .get("id")
+                        .and_then(|value| value.as_str())
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                    {
+                        tag.modrinth_id = project_id.to_string();
+                    }
+                }
+            }
             if !tag.aliases.contains(&item.filename) {
                 tag.aliases.push(item.filename.clone());
             }
@@ -168,6 +182,11 @@ pub(crate) fn sync_mods_unified(
     }
 
     if identify_unknown_sources(settings, &client, &paths, &mut tags, &mods)? {
+        write_tags(&paths.tags_path, &tags)?;
+        mods = scan_mods_for_settings(settings, catalog_root.clone())?;
+    }
+
+    if link_modrinth_ids_for_curseforge_mods(&client, &settings.curseforge_api_key, &mut tags, &mods) {
         write_tags(&paths.tags_path, &tags)?;
         mods = scan_mods_for_settings(settings, catalog_root.clone())?;
     }
@@ -312,7 +331,6 @@ pub(crate) fn sync_mods_unified(
         let step = index as u32 + 1;
         let has_modrinth = item.modrinth_id.is_some();
         let has_curseforge = item.curseforge_id.is_some() && has_cf_key;
-        let prefer_curseforge = item.source == "curseforge";
 
         if !has_modrinth && !has_curseforge {
             continue;
@@ -357,10 +375,10 @@ pub(crate) fn sync_mods_unified(
                     .map(|tag| !tag.provider_labels.fetched_at.is_empty())
                     .unwrap_or(false);
 
+            // Метки стороны: Modrinth надёжнее CurseForge (Client/Server теги часто отсутствуют).
+            // source мода влияет на обновления и каталог, но не на provider_labels.
             let active_source = if already_fetched {
                 ""
-            } else if prefer_curseforge && has_curseforge {
-                "curseforge"
             } else if has_modrinth {
                 "modrinth"
             } else if has_curseforge {
@@ -373,9 +391,38 @@ pub(crate) fn sync_mods_unified(
                 "modrinth" => mr_project
                     .as_ref()
                     .map(|project| build_modrinth_labels(project, mr_version.as_ref())),
-                "curseforge" => cf_project
-                    .as_ref()
-                    .and_then(|project| build_curseforge_labels(project, cf_file.as_ref())),
+                "curseforge" => cf_project.as_ref().and_then(|project| {
+                    let store = build_curseforge_labels(project, cf_file.as_ref())?;
+                    let modrinth_fallback = mr_project
+                        .as_ref()
+                        .map(|mr_project| build_modrinth_labels(mr_project, mr_version.as_ref()));
+                    if curseforge_side_is_ambiguous(&store) {
+                        let mut store = finalize_curseforge_labels(
+                            store,
+                            modrinth_fallback.as_ref(),
+                            cf_project.as_ref(),
+                            None,
+                        );
+                        if curseforge_side_is_ambiguous(&store) {
+                            if let Some(project_id) = item.curseforge_id.as_deref() {
+                                let files_payload = curseforge_get(
+                                    &client,
+                                    &settings.curseforge_api_key,
+                                    &format!("mods/{project_id}/files?pageSize=50"),
+                                );
+                                store = finalize_curseforge_labels(
+                                    store,
+                                    None,
+                                    None,
+                                    files_payload.as_ref(),
+                                );
+                            }
+                        }
+                        Some(store)
+                    } else {
+                        Some(store)
+                    }
+                }),
                 _ => None,
             };
 

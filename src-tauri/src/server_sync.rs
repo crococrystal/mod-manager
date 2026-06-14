@@ -82,6 +82,7 @@ struct LaneSyncAnalysis {
     mods: Vec<crate::mods::ModEntry>,
     pending: Vec<(crate::mods::ModEntry, std::path::PathBuf)>,
     already_synced: u32,
+    already_synced_names: Vec<String>,
     total_all: u32,
     remote_count: u32,
     to_delete: u32,
@@ -111,6 +112,16 @@ pub(crate) struct ServerSyncProgress {
     #[serde(default)]
     pub replaced_remote: u32,
     pub errors: Vec<String>,
+    #[serde(default)]
+    pub uploaded_names: Vec<String>,
+    #[serde(default)]
+    pub skipped_names: Vec<String>,
+    #[serde(default)]
+    pub deleted_names: Vec<String>,
+    #[serde(default)]
+    pub deleted_items: Vec<ServerSyncDeleteItem>,
+    #[serde(default)]
+    pub update_pairs: Vec<ServerSyncUpdatePair>,
     pub done: bool,
     pub ok: bool,
 }
@@ -242,7 +253,13 @@ impl ServerSyncState {
         }
     }
 
-    fn begin_upload(&self, total: u32, already_synced: u32, total_all: u32) {
+    fn begin_upload(
+        &self,
+        total: u32,
+        already_synced: u32,
+        total_all: u32,
+        already_synced_names: Vec<String>,
+    ) {
         if let Ok(mut progress) = self.inner.lock() {
             *progress = ServerSyncProgress {
                 active: true,
@@ -251,12 +268,13 @@ impl ServerSyncState {
                 total_all,
                 already_synced,
                 skipped: already_synced,
+                skipped_names: already_synced_names,
                 ..ServerSyncProgress::default()
             };
         }
     }
 
-    fn set_pruning(&self, to_delete: u32, already_synced: u32) {
+    fn set_pruning(&self, to_delete: u32, already_synced: u32, already_synced_names: Vec<String>) {
         if let Ok(mut progress) = self.inner.lock() {
             progress.active = true;
             progress.phase = "pruning".to_string();
@@ -264,6 +282,7 @@ impl ServerSyncState {
             progress.current = 0;
             progress.already_synced = already_synced;
             progress.skipped = already_synced;
+            progress.skipped_names = already_synced_names;
             progress.done = false;
             progress.ok = false;
             progress.filename.clear();
@@ -282,13 +301,15 @@ impl ServerSyncState {
         }
     }
 
-    fn add_result(&self, uploaded: bool, skipped: bool, error: Option<String>) {
+    fn add_result(&self, uploaded: bool, skipped: bool, filename: &str, error: Option<String>) {
         if let Ok(mut progress) = self.inner.lock() {
             if uploaded {
                 progress.uploaded += 1;
+                progress.uploaded_names.push(filename.to_string());
             }
             if skipped {
                 progress.skipped += 1;
+                progress.skipped_names.push(filename.to_string());
             }
             if let Some(message) = error {
                 progress.errors.push(message);
@@ -296,17 +317,22 @@ impl ServerSyncState {
         }
     }
 
-    fn set_deleted(&self, deleted: u32) {
-        if let Ok(mut progress) = self.inner.lock() {
-            progress.deleted = deleted;
-        }
-    }
-
-    fn set_deleted_breakdown(&self, deleted: u32, deleted_extra: u32, replaced_remote: u32) {
+    fn set_prune_details(
+        &self,
+        deleted: u32,
+        deleted_extra: u32,
+        replaced_remote: u32,
+        delete_names: Vec<String>,
+        delete_items: Vec<ServerSyncDeleteItem>,
+        update_pairs: Vec<ServerSyncUpdatePair>,
+    ) {
         if let Ok(mut progress) = self.inner.lock() {
             progress.deleted = deleted;
             progress.deleted_extra = deleted_extra;
             progress.replaced_remote = replaced_remote;
+            progress.deleted_names = delete_names;
+            progress.deleted_items = delete_items;
+            progress.update_pairs = update_pairs;
         }
     }
 
@@ -436,7 +462,7 @@ fn ssh_command(host: &str, remote_command: &str) -> Result<std::process::Output,
         .arg(host)
         .arg(remote_command)
         .output()
-        .map_err(|error| format!("ssh: {error}"))
+        .map_err(|error| crate::ssh_util::ssh_spawn_error(host, error))
 }
 
 fn scp_upload(host: &str, local_path: &Path, remote_file: &str) -> Result<(), String> {
@@ -459,7 +485,7 @@ fn scp_upload(host: &str, local_path: &Path, remote_file: &str) -> Result<(), St
         .arg(local_path)
         .arg(remote)
         .output()
-        .map_err(|error| format!("scp: {error}"))?;
+        .map_err(|error| crate::ssh_util::ssh_spawn_error(host, error))?;
     if output.status.success() {
         return Ok(());
     }
@@ -467,11 +493,7 @@ fn scp_upload(host: &str, local_path: &Path, remote_file: &str) -> Result<(), St
     if stderr.contains("No such file or directory") {
         return Err("Папка не найдена.".to_string());
     }
-    if stderr.is_empty() {
-        Err("Ошибка scp.".to_string())
-    } else {
-        Err(short_msg(&stderr, 48))
-    }
+    Err(crate::ssh_util::ssh_command_failed(host, &output))
 }
 
 fn sync_config(settings: &Settings) -> Option<ServerSyncSettings> {
@@ -489,6 +511,9 @@ fn sync_config(settings: &Settings) -> Option<ServerSyncSettings> {
         server_mods_path: normalize_remote_dir(&config.server_mods_path),
         distribution_mods_path: normalize_remote_dir(&config.distribution_mods_path),
         delete_extra_remote_jars: config.delete_extra_remote_jars,
+        server_os: config.server_os.clone(),
+        server_start_script: config.server_start_script.clone(),
+        server_root_path: config.server_root_path.clone(),
     })
 }
 
@@ -513,43 +538,6 @@ fn resolve_ssh_host(settings: &Settings, override_host: Option<&str>) -> Option<
         .map(|host| host.to_ascii_lowercase())
 }
 
-fn ssh_config_hostname(host: &str) -> Option<String> {
-    let output = Command::new("ssh")
-        .args(["-G", host])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    for line in text.lines() {
-        let mut parts = line.split_whitespace();
-        if parts.next()? != "hostname" {
-            continue;
-        }
-        let hostname = parts.next()?.trim();
-        if hostname.is_empty() || hostname.eq_ignore_ascii_case(host) {
-            return None;
-        }
-        return Some(hostname.to_string());
-    }
-    None
-}
-
-fn explain_ssh_error(host: &str, stderr: &str) -> String {
-    if stderr.contains("Could not resolve hostname") {
-        return format!("«{host}» не в ~/.ssh/config.");
-    }
-    if stderr.contains("Permission denied") {
-        return format!("SSH отказал: «{host}».");
-    }
-    if stderr.contains("Connection refused") || stderr.contains("Operation timed out") {
-        return format!("Нет связи с «{host}».");
-    }
-    let trimmed = stderr.trim();
-    short_msg(trimmed, 48)
-}
-
 fn mod_side(paths: &crate::settings::InstancePaths, key: &str) -> String {
     read_tags(&paths.tags_path)
         .ok()
@@ -568,7 +556,7 @@ struct RemoteDirIndex {
 
 fn format_index_dir_error(host: &str, remote_dir: &str, stderr: &str) -> String {
     if !stderr.is_empty() {
-        return explain_ssh_error(host, stderr);
+        return crate::ssh_util::explain_ssh_error(host, stderr);
     }
     let normalized = remote_dir.to_ascii_lowercase();
     if normalized.contains(".ssh/config") || normalized.ends_with("/config") {
@@ -710,22 +698,38 @@ fn prune_lane(
     lane: SyncLane,
     mods: &[crate::mods::ModEntry],
     pending_names: &[String],
-) -> Result<(usize, u32, u32), String> {
+) -> Result<(usize, SyncChangeDetails), String> {
     if !config.delete_extra_remote_jars {
-        return Ok((0, 0, 0));
+        return Ok((
+            0,
+            SyncChangeDetails {
+                to_update: 0,
+                to_upload: 0,
+                to_delete: 0,
+                upload_names: Vec::new(),
+                update_pairs: Vec::new(),
+                delete_names: Vec::new(),
+            },
+        ));
     }
     let Some(dir) = remote_dir_for_lane(config, lane) else {
-        return Ok((0, 0, 0));
+        return Ok((
+            0,
+            SyncChangeDetails {
+                to_update: 0,
+                to_upload: 0,
+                to_delete: 0,
+                upload_names: Vec::new(),
+                update_pairs: Vec::new(),
+                delete_names: Vec::new(),
+            },
+        ));
     };
     let allowed = lane_allowed_names(mods, lane);
     let orphan_names = remote_orphan_names(&config.ssh_host, &dir, &allowed)?;
     let changes = classify_lane_orphans(mods, lane, pending_names, &orphan_names);
     let deleted = prune_remote_orphans(&config.ssh_host, &dir, &allowed)?;
-    Ok((
-        deleted,
-        changes.to_delete,
-        changes.to_update,
-    ))
+    Ok((deleted, changes))
 }
 
 fn list_remote_jars(host: &str, remote_dir: &str) -> Result<Vec<String>, String> {
@@ -859,7 +863,7 @@ pub(crate) fn test_connection(settings: &Settings, ssh_host: Option<&str>) -> Se
         };
     };
 
-    if ssh_config_hostname(&host).is_none() {
+    if crate::ssh_util::ssh_config_hostname(&host).is_none() {
         return ServerSyncTestResult {
             ok: false,
             message: format!("«{host}» не в ~/.ssh/config."),
@@ -871,17 +875,10 @@ pub(crate) fn test_connection(settings: &Settings, ssh_host: Option<&str>) -> Se
             ok: true,
             message: format!("«{host}» подключён."),
         },
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            ServerSyncTestResult {
-                ok: false,
-                message: if stderr.is_empty() {
-                    "SSH недоступен.".to_string()
-                } else {
-                    explain_ssh_error(&host, &stderr)
-                },
-            }
-        }
+        Ok(output) => ServerSyncTestResult {
+            ok: false,
+            message: crate::ssh_util::ssh_command_failed(&host, &output),
+        },
         Err(error) => ServerSyncTestResult {
             ok: false,
             message: error,
@@ -1041,7 +1038,7 @@ fn prepare_lane_sync(
     if let Some(message) = lane_config_error(lane, &config) {
         return Err(message);
     }
-    if ssh_config_hostname(&config.ssh_host).is_none() {
+    if crate::ssh_util::ssh_config_hostname(&config.ssh_host).is_none() {
         return Err(format!("«{}» не в ~/.ssh/config.", config.ssh_host));
     }
     let paths = resolve_paths(&settings)?;
@@ -1070,6 +1067,7 @@ fn analyze_lane_sync(app: &AppHandle, lane: SyncLane) -> Result<LaneSyncAnalysis
 
     let mut pending = Vec::new();
     let mut already_synced = 0u32;
+    let mut already_synced_names = Vec::new();
     for (entry, local_path) in jobs {
         let local_size = fs::metadata(&local_path).map(|metadata| metadata.len()).unwrap_or(0);
         if mod_needs_upload_for_lane(
@@ -1083,6 +1081,7 @@ fn analyze_lane_sync(app: &AppHandle, lane: SyncLane) -> Result<LaneSyncAnalysis
             pending.push((entry, local_path));
         } else {
             already_synced += 1;
+            already_synced_names.push(entry.filename.clone());
         }
     }
 
@@ -1102,6 +1101,7 @@ fn analyze_lane_sync(app: &AppHandle, lane: SyncLane) -> Result<LaneSyncAnalysis
         mods,
         pending,
         already_synced,
+        already_synced_names,
         total_all,
         remote_count,
         to_delete: to_delete as u32,
@@ -1182,6 +1182,23 @@ pub(crate) fn sync_lane_mods(app: &AppHandle, state: &ServerSyncState) -> Result
     }
 }
 
+fn apply_prune_results(
+    state: &ServerSyncState,
+    mods: &[crate::mods::ModEntry],
+    deleted: usize,
+    changes: SyncChangeDetails,
+) {
+    let delete_items = delete_items_for_names(mods, &changes.delete_names);
+    state.set_prune_details(
+        deleted as u32,
+        changes.to_delete,
+        changes.to_update,
+        changes.delete_names,
+        delete_items,
+        changes.update_pairs,
+    );
+}
+
 fn sync_lane_mods_inner(app: &AppHandle, state: &ServerSyncState) -> Result<ServerSyncBulkResult, String> {
     let lane = state.lane;
     let analysis = match analyze_lane_sync(app, lane) {
@@ -1198,6 +1215,7 @@ fn sync_lane_mods_inner(app: &AppHandle, state: &ServerSyncState) -> Result<Serv
         mods,
         pending,
         already_synced,
+        already_synced_names,
         total_all,
         to_delete,
         remote_index,
@@ -1224,9 +1242,9 @@ fn sync_lane_mods_inner(app: &AppHandle, state: &ServerSyncState) -> Result<Serv
         .map(|(entry, _)| entry.filename.clone())
         .collect();
     if total == 0 && to_delete > 0 && config.delete_extra_remote_jars {
-        state.set_pruning(to_delete, already_synced);
+        state.set_pruning(to_delete, already_synced, already_synced_names.clone());
     } else {
-        state.begin_upload(total, already_synced, total_all);
+        state.begin_upload(total, already_synced, total_all, already_synced_names.clone());
     }
     emit_server_sync_progress(app, state);
 
@@ -1234,13 +1252,13 @@ fn sync_lane_mods_inner(app: &AppHandle, state: &ServerSyncState) -> Result<Serv
         let mut errors = Vec::new();
         let mut deleted = 0usize;
         if to_delete > 0 && config.delete_extra_remote_jars {
-            state.set_pruning(to_delete, already_synced);
+            state.set_pruning(to_delete, already_synced, already_synced_names.clone());
             emit_server_sync_progress(app, state);
         }
         match prune_lane(&config, lane, &mods, &pending_names) {
-            Ok((count, deleted_extra, replaced_remote)) => {
+            Ok((count, changes)) => {
                 deleted = count;
-                state.set_deleted_breakdown(deleted as u32, deleted_extra, replaced_remote);
+                apply_prune_results(state, &mods, deleted, changes);
             }
             Err(error) => errors.push(error),
         }
@@ -1262,13 +1280,13 @@ fn sync_lane_mods_inner(app: &AppHandle, state: &ServerSyncState) -> Result<Serv
     if total == 0 {
         let mut deleted = 0usize;
         if to_delete > 0 && config.delete_extra_remote_jars {
-            state.set_pruning(to_delete, already_synced);
+            state.set_pruning(to_delete, skipped as u32, already_synced_names.clone());
             emit_server_sync_progress(app, state);
         }
         match prune_lane(&config, lane, &mods, &pending_names) {
-            Ok((count, deleted_extra, replaced_remote)) => {
+            Ok((count, changes)) => {
                 deleted = count;
-                state.set_deleted_breakdown(deleted as u32, deleted_extra, replaced_remote);
+                apply_prune_results(state, &mods, deleted, changes);
             }
             Err(error) => errors.push(error),
         }
@@ -1303,16 +1321,16 @@ fn sync_lane_mods_inner(app: &AppHandle, state: &ServerSyncState) -> Result<Serv
         ) {
             Ok(true) => {
                 uploaded += 1;
-                state.add_result(true, false, None);
+                state.add_result(true, false, &entry.filename, None);
             }
             Ok(false) => {
                 skipped += 1;
-                state.add_result(false, true, None);
+                state.add_result(false, true, &entry.filename, None);
             }
             Err(error) => {
                 let message = short_msg(&format!("{}: {error}", entry.filename), 48);
                 errors.push(message.clone());
-                state.add_result(false, false, Some(message));
+                state.add_result(false, false, &entry.filename, Some(message));
             }
         }
     }
@@ -1320,13 +1338,17 @@ fn sync_lane_mods_inner(app: &AppHandle, state: &ServerSyncState) -> Result<Serv
     let mut deleted = 0usize;
     if !state.is_cancelled() {
         if to_delete > 0 && config.delete_extra_remote_jars {
-            state.set_pruning(to_delete, skipped as u32);
+            state.set_pruning(
+                to_delete,
+                skipped as u32,
+                state.snapshot().skipped_names.clone(),
+            );
             emit_server_sync_progress(app, state);
         }
         match prune_lane(&config, lane, &mods, &pending_names) {
-            Ok((count, deleted_extra, replaced_remote)) => {
+            Ok((count, changes)) => {
                 deleted = count;
-                state.set_deleted_breakdown(deleted as u32, deleted_extra, replaced_remote);
+                apply_prune_results(state, &mods, deleted, changes);
             }
             Err(error) => errors.push(error),
         }

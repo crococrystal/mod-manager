@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Server } from 'lucide-react';
 import { saveSettings } from '../../api.js';
-import { Button } from '../../components/Button.jsx';
+import { IconButton } from '../../components/Button.jsx';
 import { ServerSyncPathField } from './ServerSyncPathField.jsx';
 import {
+  deriveServerRootPath,
   normalizeServerSyncDraft,
   normalizeSshHost,
   serverSyncFromSettings,
@@ -18,6 +19,8 @@ import {
   EMPTY_PREVIEW_OVERLAY,
   previewToOverlayUi
 } from './serverSyncPreviewUi.js';
+import { LoaderUpdatePanel } from '../loader-update/LoaderUpdatePanel.jsx';
+import { ServerControlPanel } from '../server-control/ServerControlPanel.jsx';
 
 const SSH_HOST_HINT = 'Алиас из ~/.ssh/config (User, Port, ключ).';
 const CONNECTION_STATUS_RESET_MS = 3000;
@@ -151,6 +154,16 @@ export function ServerSyncSettingsPanel({
     clearConnectionStatus();
     if ('serverModsPath' in patch) {
       resetLanePreview('server');
+      const nextMods = String(patch.serverModsPath ?? '');
+      const prevDerived = deriveServerRootPath(draft.serverModsPath);
+      const shouldAutofill =
+        !draft.serverRootPath.trim() || draft.serverRootPath === prevDerived;
+      if (shouldAutofill) {
+        patch = {
+          ...patch,
+          serverRootPath: deriveServerRootPath(nextMods)
+        };
+      }
     }
     if ('distributionModsPath' in patch) {
       resetLanePreview('distribution');
@@ -341,19 +354,37 @@ export function ServerSyncSettingsPanel({
             onChange={(event) => updateDraft({ sshHost: event.target.value })}
             onBlur={handleBlurSave}
           />
-          <Button
+          <IconButton
             icon={Server}
+            label={testing ? 'Проверка…' : 'Проверка'}
+            className={testing ? 'serverSyncPathSyncBtn--spinning' : ''}
             onMouseDown={preventBlur}
             onClick={handleTestConnection}
             disabled={panelBusy || actionBusy || !draft.sshHost.trim()}
-          >
-            {testing ? 'Проверка…' : 'Проверка'}
-          </Button>
+          />
         </div>
         <p className={sshHostHintClassName} role="status" aria-live="polite">
           {showConnectionStatus ? testMessage : SSH_HOST_HINT}
         </p>
       </div>
+
+      <ServerControlPanel
+        sshHost={draft.sshHost}
+        serverRootPath={draft.serverRootPath}
+        serverStartScript={draft.serverStartScript}
+        disabled={panelBusy}
+        actionBusy={actionBusy}
+        inputDisabled={panelBusy}
+        onRootPathChange={(event) => updateDraft({ serverRootPath: event.target.value })}
+        onStartSettingChange={(patch) => updateDraft(patch)}
+        onBlur={handleBlurSave}
+      />
+
+      <LoaderUpdatePanel
+        sshHost={draft.sshHost}
+        disabled={panelBusy}
+        actionBusy={actionBusy}
+      />
 
       <div className="serverSyncToggleGroup">
         <label className="serverSyncToggleRow">

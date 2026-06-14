@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { DependencyModalBackdrop } from '../../components/DependencyModalBackdrop.jsx';
 import { getModalPortalRoot } from '../../lib/modalPortal.js';
-import { Download, LoaderCircle } from 'lucide-react';
+import { Check, Download, LoaderCircle } from 'lucide-react';
 import { installFromCatalog } from '../../api.js';
 import { catalogProviderPageUrl } from '../../lib/modMeta.jsx';
-import { CatalogInstallDependencies, splitCatalogDependencies } from './CatalogInstallDependencies.jsx';
+import { CatalogInstallDependencies } from './CatalogInstallDependencies.jsx';
 import { CatalogInstallHeader } from './CatalogInstallHeader.jsx';
 import { CatalogProjectDescriptionPanel } from './CatalogProjectDescriptionPanel.jsx';
 import { useCatalogInstallPreview } from './useCatalogInstallPreview.js';
@@ -65,7 +65,7 @@ export function CatalogInstallDialog({
 
   if (!candidate || !source) return null;
 
-  const { installed, pending } = splitCatalogDependencies(preview?.dependencies);
+  const dependencies = preview?.dependencies ?? [];
   const error = installError || previewError || detailsError;
   const project = details ?? preview;
   const description = details?.description ?? preview?.description;
@@ -128,29 +128,35 @@ export function CatalogInstallDialog({
 
         <div className="catalogInstallBody" role="dialog" aria-modal="true" aria-label="Установка мода">
           {error ? <p className="providerSearchError">{error}</p> : null}
-          <CatalogProjectDescriptionPanel
-            className="catalogInstallDescriptionWrap"
-            description={description}
-            loading={detailsLoading}
-          />
-          {preview ? (
-            <>
-              {!loading ? <CatalogInstallDependencies installed={installed} pending={pending} /> : null}
-            </>
-          ) : null}
+          <div className="catalogInstallContent">
+            <CatalogProjectDescriptionPanel
+              className="catalogInstallDescriptionWrap"
+              description={description}
+              loading={detailsLoading}
+            />
+            {preview ? (
+              <>
+                {!loading ? <CatalogInstallDependencies dependencies={dependencies} /> : null}
+              </>
+            ) : null}
+          </div>
           <button
             type="button"
             className="catalogInstallAction"
             onClick={handleInstall}
             disabled={installDisabled}
           >
-            {installing || loading ? (
+            {alreadyInstalled ? (
+              <Check size={18} />
+            ) : installing || loading ? (
               <LoaderCircle className="spin" size={18} />
             ) : (
               <Download size={18} />
             )}
             {alreadyInstalled ? 'Уже установлен' : loading ? 'Проверка зависимостей...' : 'Установить'}
-            {!alreadyInstalled && !loading && pending.length ? ` (+${pending.length} завис.)` : ''}
+            {!alreadyInstalled && !loading && dependencies.some((dep) => dep.status !== 'installed')
+              ? ` (+${dependencies.filter((dep) => dep.status !== 'installed').length} завис.)`
+              : ''}
           </button>
         </div>
       </div>

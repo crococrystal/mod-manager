@@ -9,6 +9,7 @@ mod external_links;
 mod file_identity;
 mod instance_meta;
 mod instance_registry;
+mod loader_update;
 mod jar_deps;
 mod mod_names;
 mod mods;
@@ -17,8 +18,11 @@ mod prefetch;
 mod provider_labels;
 mod providers;
 mod remote;
+mod server_control;
 mod server_sync;
 mod settings;
+mod ssh_exec;
+mod ssh_util;
 mod tags;
 mod util;
 mod window_chrome;
@@ -87,6 +91,15 @@ pub fn run() {
             server_sync::cancel_server_sync_lane,
             server_sync::preview_server_sync_lane,
             server_sync::sync_mods_to_server_lane,
+            loader_update::check_neoforge_update,
+            loader_update::apply_neoforge_update,
+            loader_update::get_neoforge_version_catalog,
+            loader_update::refresh_neoforge_row,
+            server_control::check_server_control_status,
+            server_control::start_server_control,
+            server_control::stop_server_control,
+            server_control::read_server_launch_script,
+            server_control::write_server_launch_script,
             commands::check_mod_updates,
             commands::search_provider_catalog,
             commands::preview_catalog_install,

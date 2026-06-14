@@ -2,14 +2,19 @@ import { RefreshCw } from 'lucide-react';
 import { formatRowIndex, previewFileListStyle } from './previewFileList.js';
 import { ServerSyncPreviewStat } from './ServerSyncPreviewStat.jsx';
 
-export function ServerSyncPreviewUpdateStat({ count, pairs }) {
+export function ServerSyncPreviewUpdateStat({
+  count,
+  pairs,
+  title = 'Будет обновлено',
+  label
+}) {
   return (
     <ServerSyncPreviewStat
       icon={RefreshCw}
       count={count}
       variant="update"
-      label={`Будет обновлено: ${count}`}
-      title="Будет обновлено"
+      label={label ?? `Будет обновлено: ${count}`}
+      title={title}
     >
       <ul
         className="serverSyncPreviewFileList serverSyncPreviewFileList--update"

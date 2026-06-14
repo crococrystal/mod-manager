@@ -4,14 +4,19 @@ import { previewFileListStyle } from './previewFileList.js';
 import { ServerSyncPreviewModSideTag } from './ServerSyncPreviewModSideTag.jsx';
 import { ServerSyncPreviewStat } from './ServerSyncPreviewStat.jsx';
 
-export function ServerSyncPreviewDeleteStat({ count, files }) {
+export function ServerSyncPreviewDeleteStat({
+  count,
+  files,
+  title = 'Будет удалено',
+  label
+}) {
   return (
     <ServerSyncPreviewStat
       icon={Trash2}
       count={count}
       variant="delete"
-      label={`Будет удалено: ${count}`}
-      title="Будет удалено"
+      label={label ?? `Будет удалено: ${count}`}
+      title={title}
     >
       <ul className="serverSyncPreviewFileList" style={previewFileListStyle(files.length)}>
         {files.map((item, index) => {

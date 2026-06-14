@@ -3,8 +3,23 @@ export const defaultServerSync = () => ({
   sshHost: '',
   serverModsPath: '',
   distributionModsPath: '',
-  deleteExtraRemoteJars: true
+  deleteExtraRemoteJars: true,
+  serverOs: 'auto',
+  serverStartScript: '',
+  serverRootPath: ''
 });
+
+export function deriveServerRootPath(serverModsPath) {
+  let path = String(serverModsPath ?? '').trim().replace(/\\/g, '/');
+  while (path.endsWith('/')) {
+    path = path.slice(0, -1);
+  }
+  if (!path) return '';
+  if (path.toLowerCase().endsWith('/mods')) {
+    return path.slice(0, -5).replace(/\/$/, '');
+  }
+  return path;
+}
 
 export function normalizeSshHost(value) {
   return String(value ?? '').trim().toLowerCase();
@@ -24,12 +39,16 @@ export function normalizeRemotePath(value) {
 }
 
 export function normalizeServerSyncDraft(serverSync) {
+  const serverModsPath = normalizeRemotePath(serverSync?.serverModsPath);
+  const serverRootPath = normalizeRemotePath(serverSync?.serverRootPath);
   return {
     ...defaultServerSync(),
     ...serverSync,
     sshHost: normalizeSshHost(serverSync?.sshHost),
-    serverModsPath: normalizeRemotePath(serverSync?.serverModsPath),
-    distributionModsPath: normalizeRemotePath(serverSync?.distributionModsPath)
+    serverModsPath,
+    distributionModsPath: normalizeRemotePath(serverSync?.distributionModsPath),
+    serverRootPath: serverRootPath || deriveServerRootPath(serverModsPath),
+    serverStartScript: String(serverSync?.serverStartScript ?? '').trim()
   };
 }
 

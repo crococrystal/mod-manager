@@ -4,6 +4,27 @@ import { ModCover } from '../mods/ModCover.jsx';
 import { sourceIcons, UpdatesCurrentState } from '../../lib/modMeta.jsx';
 import { useSelectedListDock } from '../../hooks/useSelectedListDock.js';
 import { useTableDragSelect } from '../../hooks/useTableDragSelect.js';
+import { resolveCatalogInstalledIndicator } from './catalogInstalledStatus.js';
+
+function CatalogInstalledBadge({ indicator }) {
+  if (!indicator?.show) return null;
+
+  const provider = sourceIcons[indicator.source] ?? sourceIcons.manual;
+  const label = provider?.label ?? 'Установлен';
+
+  return (
+    <span
+      className="catalogSearchInstalledMark"
+      title={`Установлен с ${label}`}
+      aria-label={`Установлен с ${label}`}
+    >
+      <span className="catalogSearchInstalledProvider">
+        <img src={provider.icon} alt="" />
+      </span>
+      <Check className="catalogSearchInstalledCheck" size={14} strokeWidth={2.5} aria-hidden />
+    </span>
+  );
+}
 
 function formatInstanceTarget(target) {
   if (!target) return '';
@@ -35,6 +56,7 @@ export function CatalogSearchPanel({
   error,
   query,
   installedProjectIds,
+  installedMods = [],
   modForItem,
   selectedKey,
   selectedKeys,
@@ -181,7 +203,12 @@ export function CatalogSearchPanel({
         ) : (
           <ul ref={listRef} className="catalogSearchList scrollArea">
             {results.map((item) => {
-              const installed = installedProjectIds?.has(String(item.id));
+              const installedIndicator = resolveCatalogInstalledIndicator({
+                catalogSource: source,
+                item,
+                mods: installedMods,
+                installedProjectIds
+              });
               const coverMod =
                 modForItem?.(item) ?? { coverUrl: item.iconUrl, displayName: item.title };
 
@@ -192,11 +219,7 @@ export function CatalogSearchPanel({
                     <span className="catalogSearchText">
                       <span className="catalogSearchTitleLine">
                         <strong>{item.title}</strong>
-                        {installed ? (
-                          <span className="catalogSearchInstalled">
-                            <Check size={14} strokeWidth={2.5} aria-hidden />
-                          </span>
-                        ) : null}
+                        <CatalogInstalledBadge indicator={installedIndicator} />
                       </span>
                       {item.summary ? <small>{item.summary}</small> : null}
                     </span>

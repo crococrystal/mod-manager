@@ -13,6 +13,7 @@ use crate::catalog_cache;
 use crate::instance_meta::{
     detect_instance_target, target_has_filters, version_matches_target, InstanceTarget,
 };
+use crate::mod_names::normalized_match_key;
 use crate::mods::{scan_mods_for_settings, stable_key, ModEntry};
 use crate::mods_watch;
 use crate::remote::{
@@ -423,13 +424,22 @@ fn collect_pending_installs(
         if !planned.insert(dep_id.clone()) {
             continue;
         }
-        if installed_key_for_project(mods, source, &dep_id).is_some() {
-            continue;
-        }
-        let (_, slug, _) = project_meta(client, settings, source, &dep_id)?;
+        let (title, slug, _) = project_meta(client, settings, source, &dep_id)
+            .unwrap_or_else(|_| ("Зависимость".to_string(), None, None));
         let dep_item = resolve_install_item(
             client, settings, source, &dep_id, slug, None, target, 0, visiting,
         )?;
+        if installed_key_for_dependency(
+            mods,
+            source,
+            &dep_id,
+            &title,
+            Some(&dep_item.version.filename),
+        )
+        .is_some()
+        {
+            continue;
+        }
         collect_pending_installs(
             paths, mods, source, &dep_item, client, settings, target, plan, planned, visiting,
         )?;
@@ -460,7 +470,16 @@ fn build_dependency_preview(
         let title = project_meta(client, settings, source, &dep_id)
             .map(|meta| meta.0)
             .unwrap_or_else(|_| "Зависимость".to_string());
-        if let Some(key) = installed_key_for_project(mods, source, &dep_id) {
+        let dep_item = resolve_install_item(
+            client, settings, source, &dep_id, None, None, target, 0, visiting,
+        )?;
+        if let Some(key) = installed_key_for_dependency(
+            mods,
+            source,
+            &dep_id,
+            &title,
+            Some(&dep_item.version.filename),
+        ) {
             let filename = mods
                 .iter()
                 .find(|item| item.key == key)
@@ -481,9 +500,6 @@ fn build_dependency_preview(
             key: None,
             filename: None,
         });
-        let dep_item = resolve_install_item(
-            client, settings, source, &dep_id, None, None, target, 0, visiting,
-        )?;
         build_dependency_preview(
             mods, source, &dep_item, client, settings, target, out, listed, visiting,
         )?;
@@ -680,6 +696,41 @@ fn installed_key_for_project(mods: &[ModEntry], source: &str, project_id: &str) 
         "curseforge" if item.curseforge_id.as_deref() == Some(project_id) => Some(item.key.clone()),
         _ => None,
     })
+}
+
+fn installed_key_for_dependency(
+    mods: &[ModEntry],
+    source: &str,
+    project_id: &str,
+    title: &str,
+    filename: Option<&str>,
+) -> Option<String> {
+    if let Some(key) = installed_key_for_project(mods, source, project_id) {
+        return Some(key);
+    }
+    for item in mods {
+        if item.modrinth_id.as_deref() == Some(project_id)
+            || item.curseforge_id.as_deref() == Some(project_id)
+        {
+            return Some(item.key.clone());
+        }
+    }
+    if let Some(filename) = filename.and_then(clean_string) {
+        for item in mods {
+            if item.filename == filename {
+                return Some(item.key.clone());
+            }
+        }
+    }
+    let title_key = normalized_match_key(title);
+    if !title_key.is_empty() {
+        for item in mods {
+            if normalized_match_key(&item.display_name) == title_key {
+                return Some(item.key.clone());
+            }
+        }
+    }
+    None
 }
 
 fn install_item_jar(

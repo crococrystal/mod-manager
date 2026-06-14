@@ -6,55 +6,62 @@ function buildDoneParts(progress) {
   const deleted = progress.deleted ?? 0;
   const deletedExtra = progress.deletedExtra ?? 0;
   const replacedRemote = progress.replacedRemote ?? 0;
-  const extras = [];
+  const deleteCount =
+    deletedExtra > 0 ? deletedExtra : deleted > 0 ? deleted : null;
 
-  if (replacedRemote > 0) {
-    extras.push(`Обновлено: ${replacedRemote}`);
-  }
-  if (deletedExtra > 0) {
-    extras.push(`Удалено лишних: ${deletedExtra}`);
-  } else if (deleted > 0 && replacedRemote === 0 && uploaded === 0) {
-    extras.push(`Удалено ${formatFiles(deleted)}`);
-  }
-  if (progress.errors?.length) {
-    extras.push(
-      progress.errors.length === 1
-        ? progress.errors[0]
-        : `${progress.errors.length} ошибок`
-    );
-  }
+  const uploadFiles = progress.uploadedNames?.length
+    ? progress.uploadedNames
+    : null;
+  const skipFiles = progress.skippedNames?.length ? progress.skippedNames : null;
+  const deleteFiles = progress.deletedItems?.length
+    ? progress.deletedItems
+    : progress.deletedNames?.length
+      ? progress.deletedNames
+      : null;
+  const updatePairs = progress.updatePairs?.length ? progress.updatePairs : null;
 
-  let primary;
-  if (uploaded > 0) {
-    primary = `Загружено: ${uploaded}`;
-  } else if (deletedExtra > 0) {
-    primary = `Удалено лишних: ${deletedExtra}`;
-  } else if (deleted > 0) {
-    primary = `Удалено: ${deleted}`;
-  } else {
-    primary = `Загружено: ${uploaded}`;
-  }
-
-  return {
-    primary,
-    uploaded: primary,
-    skipped: skipped > 0 ? `Уже были на сервере: ${skipped}` : null,
-    extra: extras.length ? extras.join(' · ') : null
-  };
-}
-
-function formatDoneMessage(progress) {
   if (
     !progress.ok &&
     progress.errors?.length === 1 &&
-    !(progress.uploaded ?? 0) &&
-    !(progress.skipped ?? 0)
+    !uploaded &&
+    !skipped &&
+    !deleteCount &&
+    !replacedRemote
   ) {
-    return progress.errors[0];
+    return {
+      title: progress.errors[0],
+      uploadCount: null,
+      updateCount: null,
+      deleteCount: null,
+      skipCount: null,
+      uploadFiles: null,
+      skipFiles: null,
+      deleteFiles: null,
+      updatePairs: null,
+      error: true
+    };
   }
 
-  const parts = buildDoneParts(progress);
-  return [parts.primary, parts.skipped, parts.extra].filter(Boolean).join(' ');
+  let title = 'Синхронизация завершена';
+  if (!progress.ok && progress.errors?.length) {
+    title =
+      progress.errors.length === 1
+        ? progress.errors[0]
+        : `${progress.errors.length} ошибок`;
+  }
+
+  return {
+    title,
+    uploadCount: uploaded > 0 ? uploaded : null,
+    updateCount: replacedRemote > 0 ? replacedRemote : null,
+    deleteCount,
+    skipCount: skipped > 0 ? skipped : null,
+    uploadFiles,
+    skipFiles,
+    deleteFiles,
+    updatePairs,
+    error: !progress.ok
+  };
 }
 
 export function progressToLaneUi(progress) {
@@ -187,8 +194,8 @@ export function progressToLaneUi(progress) {
     return {
       syncing: false,
       showResult: true,
-      main: formatDoneMessage(progress),
-      side: doneParts.skipped ?? '',
+      main: doneParts.title,
+      side: '',
       filename: '',
       doneParts,
       phase: '',

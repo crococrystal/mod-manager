@@ -3239,6 +3239,32 @@ dd {
   color: #8fd4b8;
 }
 
+.serverSyncPanel {
+  --sync-row-height: 38px;
+  --sync-action-size: 38px;
+  --sync-action-gap: 8px;
+  --sync-label-width: 72px;
+}
+
+.serverSyncPanel .pathField,
+.serverSyncPanel .loaderUpdateRow {
+  grid-template-columns: minmax(0, 1fr) var(--sync-action-size);
+  gap: var(--sync-action-gap);
+  align-items: center;
+}
+
+.serverSyncPanel input:not([type='checkbox']),
+.serverSyncPanel .loaderUpdateVersionSelect {
+  height: var(--sync-row-height);
+  box-sizing: border-box;
+}
+
+.serverSyncPanel .iconButton {
+  width: var(--sync-action-size);
+  height: var(--sync-action-size);
+  flex-shrink: 0;
+}
+
 .serverSyncPanel .settingsBlockHint {
   margin: 6px 0 0;
   color: #8a9a94;
@@ -3312,17 +3338,227 @@ dd {
   opacity: 1;
 }
 
-.serverSyncHostField {
-  grid-template-columns: minmax(0, 1fr) auto;
+.loaderUpdateField {
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.serverSyncPathField {
-  grid-template-columns: minmax(0, 1fr) auto;
+.serverControlSection {
+  display: grid;
+  gap: 12px;
 }
 
-.serverSyncPathField .iconButton {
-  width: 38px;
-  height: 38px;
+.serverControlStartSettings {
+  display: grid;
+  gap: 10px;
+}
+
+.serverControlStartSelect {
+  width: 100%;
+  max-width: none;
+}
+
+.serverControlStartField {
+  gap: 6px;
+}
+
+.serverControlScriptRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--sync-action-size);
+  gap: var(--sync-action-gap);
+  align-items: center;
+}
+
+.launchScriptEditor {
+  width: 100%;
+  min-height: 320px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.28);
+  color: inherit;
+}
+
+.launchScriptModalFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.launchScriptModalError {
+  margin: 0;
+  color: var(--danger, #ff6b6b);
+  font-size: 13px;
+}
+
+.launchScriptModalSave {
+  margin-left: auto;
+}
+
+.loaderUpdateFieldHeader {
+  display: grid;
+  grid-template-columns: var(--sync-label-width) minmax(0, 1fr) var(--sync-action-size);
+  gap: var(--sync-action-gap);
+  align-items: center;
+  height: var(--sync-row-height);
+}
+
+.loaderUpdateLogo {
+  grid-column: 1;
+  display: block;
+  width: var(--sync-label-width);
+  height: var(--sync-row-height);
+  max-width: var(--sync-label-width);
+  flex-shrink: 0;
+  object-fit: contain;
+  object-position: left center;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.loaderUpdateVersionSelect {
+  grid-column: 2;
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  height: var(--sync-row-height);
+  padding: 0 28px 0 10px;
+  border-radius: 6px;
+  border: 1px solid #39454b;
+  background: #101416;
+  color: #e6e8ea;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239aa3a9' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  box-sizing: border-box;
+}
+
+.loaderUpdateVersionSelect:disabled {
+  opacity: 0.5;
+}
+
+.loaderUpdateVersionSelect--error:disabled {
+  color: #e08a84;
+  opacity: 1;
+}
+
+.loaderUpdateRows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.loaderUpdateRow {
+  display: grid;
+  align-items: center;
+}
+
+.loaderUpdateRowMain {
+  position: relative;
+  overflow: hidden;
+  min-height: var(--sync-row-height);
+  height: var(--sync-row-height);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-sizing: border-box;
+}
+
+.loaderUpdateRowContent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--sync-row-height);
+  height: var(--sync-row-height);
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+
+.loaderUpdateRowMain--overlay .loaderUpdateRowContent {
+  visibility: hidden;
+}
+
+.loaderUpdateRowOverlay {
+  border-radius: 9px;
+  border-color: rgba(255, 255, 255, 0.1);
+  cursor: default;
+  pointer-events: none;
+}
+
+.loaderUpdateRowOverlay .serverSyncPathOverlayRow {
+  bottom: 2px;
+}
+
+.loaderUpdateRowLabel {
+  flex: 0 0 var(--sync-label-width);
+  width: var(--sync-label-width);
+  font-size: 12px;
+  font-weight: 600;
+  color: #9aa3a9;
+}
+
+.loaderUpdateRowCurrent {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #d8dee3;
+}
+
+.loaderUpdateRow .iconButton {
+  flex-shrink: 0;
+}
+
+.loaderUpdateStatus {
+  margin-left: auto;
+  flex-shrink: 0;
+  text-align: right;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.loaderUpdateStatus--ok {
+  color: #7bc89a;
+}
+
+.loaderUpdateStatus--outdated {
+  color: #e8b86d;
+}
+
+.loaderUpdateStatus--unknown {
+  color: #6f787e;
+}
+
+.loaderUpdateRowStatusOnly {
+  margin-left: auto;
+}
+
+.loaderUpdateHint--ok {
+  color: #7bc89a;
+}
+
+.loaderUpdateHint--error {
+  color: #e08a84;
+}
+
+.loaderUpdateWarnings {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #9aa3a9;
 }
 
 .serverSyncPathOverlay--preview {
@@ -3372,6 +3608,17 @@ dd {
 
 .serverSyncPreviewStat--delete .serverSyncPreviewStatTrigger {
   color: #b89090;
+}
+
+.serverSyncPreviewStat--skip .serverSyncPreviewStatTrigger {
+  color: #8fb89a;
+}
+
+.serverSyncDoneStatSummary {
+  margin: 0;
+  color: #a7b0b6;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .serverSyncPreviewStatTooltip {
@@ -3536,6 +3783,10 @@ dd {
 
 .serverSyncPreviewFileRow--delete .serverSyncPreviewFileMarker:not(.serverSyncPreviewFileMarker--tag) {
   color: #b89090;
+}
+
+.serverSyncPreviewFileRow--skip .serverSyncPreviewFileMarker {
+  color: #8fb89a;
 }
 
 .serverSyncPreviewFileContent {

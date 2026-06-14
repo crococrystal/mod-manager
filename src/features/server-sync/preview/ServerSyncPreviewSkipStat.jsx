@@ -1,21 +1,20 @@
-import { Upload } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { ServerSyncPreviewFileRow } from './ServerSyncPreviewFileRow.jsx';
 import { previewFileListStyle } from './previewFileList.js';
 import { ServerSyncPreviewStat } from './ServerSyncPreviewStat.jsx';
 
-export function ServerSyncPreviewUploadStat({
+export function ServerSyncPreviewSkipStat({
   count,
   files,
-  title = 'Будет отправлено',
-  label,
-  marker = '+'
+  title = 'Уже на сервере',
+  label
 }) {
   return (
     <ServerSyncPreviewStat
-      icon={Upload}
+      icon={Check}
       count={count}
-      variant="upload"
-      label={label ?? `Будет отправлено: ${count}`}
+      variant="skip"
+      label={label ?? `Уже на сервере: ${count}`}
       title={title}
     >
       <ul className="serverSyncPreviewFileList" style={previewFileListStyle(files.length)}>
@@ -24,8 +23,8 @@ export function ServerSyncPreviewUploadStat({
             key={name}
             index={index}
             total={files.length}
-            variant="upload"
-            marker={marker}
+            variant="skip"
+            marker="✓"
           >
             <span className="serverSyncPreviewFileName">{name}</span>
           </ServerSyncPreviewFileRow>

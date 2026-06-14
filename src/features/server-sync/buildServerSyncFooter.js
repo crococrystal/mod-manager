@@ -10,9 +10,17 @@ function laneFooterItem(lane, ui, visibleResult) {
   if (ui.doneParts) {
     return {
       lane,
-      main: ui.doneParts.uploaded,
-      side: ui.doneParts.skipped,
-      extra: ui.doneParts.extra,
+      main: ui.doneParts.title,
+      stats: {
+        uploadCount: ui.doneParts.uploadCount,
+        updateCount: ui.doneParts.updateCount,
+        deleteCount: ui.doneParts.deleteCount,
+        skipCount: ui.doneParts.skipCount,
+        uploadFiles: ui.doneParts.uploadFiles,
+        skipFiles: ui.doneParts.skipFiles,
+        deleteFiles: ui.doneParts.deleteFiles,
+        updatePairs: ui.doneParts.updatePairs
+      },
       syncing: ui.syncing,
       error: ui.error,
       phase: ui.phase,
@@ -36,8 +44,7 @@ function laneFooterItem(lane, ui, visibleResult) {
 
 function formatFooterLabel(items) {
   if (items.length === 1) {
-    const item = items[0];
-    return [item.main, item.side, item.extra].filter(Boolean).join(' ');
+    return items[0].main;
   }
 
   return items
@@ -46,6 +53,24 @@ function formatFooterLabel(items) {
       return `${lane?.shortLabel ?? item.lane}: ${item.main}`;
     })
     .join(' · ');
+}
+
+function footerStats(items) {
+  if (items.length !== 1 || items[0].syncing || !items[0].stats) {
+    return null;
+  }
+
+  const { uploadCount, updateCount, deleteCount, skipCount } = items[0].stats;
+  if (
+    uploadCount == null &&
+    updateCount == null &&
+    deleteCount == null &&
+    skipCount == null
+  ) {
+    return null;
+  }
+
+  return items[0].stats;
 }
 
 export function buildServerSyncFooter({
@@ -82,6 +107,7 @@ export function buildServerSyncFooter({
     indeterminate: syncingItems.length > 0 && !hasUploadProgress,
     scopedProgress: syncingItems.length > 0 && hasUploadProgress,
     label: formatFooterLabel(items),
+    stats: footerStats(items),
     labelWarn: items.some((item) => item.error)
   };
 }

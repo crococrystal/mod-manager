@@ -21,6 +21,7 @@ import {
 } from './api.js';
 import { CatalogInstallDialog } from './features/catalog/CatalogInstallDialog.jsx';
 import { CatalogSearchPanel } from './features/catalog/CatalogSearchPanel.jsx';
+import { isCatalogItemInstalled } from './features/catalog/catalogInstalledStatus.js';
 import { useCatalogSearch } from './features/catalog/useCatalogSearch.js';
 import { AppToolbar } from './components/AppToolbar.jsx';
 import { StatsBar } from './components/StatsBar.jsx';
@@ -49,6 +50,7 @@ import {
   buildServerSyncFooter,
   mergeWorkspaceFooters
 } from './features/server-sync/buildServerSyncFooter.js';
+import { ServerSyncDoneStats } from './features/server-sync/ServerSyncDoneStats.jsx';
 import { useServerSyncProgress } from './features/server-sync/useServerSyncProgress.js';
 import {
   shouldShowUpdatesPanel,
@@ -420,18 +422,29 @@ function App() {
   const catalogInstalledProjectIds =
     catalogInstalledProjectIdsBySource[catalogSource] ?? catalogInstalledProjectIdsBySource.modrinth;
 
-  const catalogInstallInstalledProjectIds =
-    catalogInstalledProjectIdsBySource[catalogInstallSelection?.source] ?? EMPTY_SET;
-
   const catalogInstallInstalledStateKey = useMemo(
-    () => [...catalogInstallInstalledProjectIds].sort((a, b) => a.localeCompare(b)).join('|'),
-    [catalogInstallInstalledProjectIds]
+    () =>
+      mods
+        .flatMap((mod) => [mod.modrinthId, mod.curseforgeId, mod.source, mod.displayName])
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))
+        .join('|'),
+    [mods]
   );
 
-  const catalogInstallAlreadyInstalled = Boolean(
-    catalogInstallSelection?.candidate?.id &&
-      catalogInstallInstalledProjectIds.has(String(catalogInstallSelection.candidate.id))
-  );
+  const catalogInstallAlreadyInstalled = useMemo(() => {
+    const candidate = catalogInstallSelection?.candidate;
+    const source = catalogInstallSelection?.source;
+    if (!candidate?.id || !source) return false;
+    const installedProjectIds =
+      catalogInstalledProjectIdsBySource[source] ?? catalogInstalledProjectIdsBySource.modrinth;
+    return isCatalogItemInstalled({
+      catalogSource: source,
+      item: candidate,
+      mods,
+      installedProjectIds
+    });
+  }, [catalogInstallSelection, catalogInstalledProjectIdsBySource, mods]);
 
   const catalogModForItem = useCallback(
     (item) => {
@@ -1576,6 +1589,7 @@ function App() {
                   updatesLoading={updatesLoadingVisible}
                   query={query}
                   installedProjectIds={catalogInstalledProjectIds}
+                  installedMods={mods}
                   modForItem={catalogModForItem}
                   selectedKey={isUpdatesMode ? selected?.key : null}
                   selectedKeys={isUpdatesMode ? selectedKeys : null}
@@ -1716,6 +1730,18 @@ function App() {
             <p className={`prefetchProgressLabel${workspaceFooter.labelWarn ? ' prefetchProgressLabel--warn' : ''}`}>
               {workspaceFooter.label}
             </p>
+            {workspaceFooter.stats ? (
+              <ServerSyncDoneStats
+                uploadCount={workspaceFooter.stats.uploadCount}
+                updateCount={workspaceFooter.stats.updateCount}
+                deleteCount={workspaceFooter.stats.deleteCount}
+                skipCount={workspaceFooter.stats.skipCount}
+                uploadFiles={workspaceFooter.stats.uploadFiles}
+                skipFiles={workspaceFooter.stats.skipFiles}
+                deleteFiles={workspaceFooter.stats.deleteFiles}
+                updatePairs={workspaceFooter.stats.updatePairs}
+              />
+            ) : null}
             {workspaceFooter.cancelable ? (
               <button
                 type="button"

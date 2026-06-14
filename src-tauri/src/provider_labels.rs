@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 use crate::mods::{normalize_side, ModEntry};
-use crate::remote::{curseforge_get, http_client, modrinth_project, modrinth_version};
+use crate::remote::{curseforge_get, curseforge_mod_info, http_client, modrinth_project, modrinth_version};
 use crate::settings::Settings;
 use crate::tags::{ModTags, ProviderLabelsStore};
 use crate::util::now_iso;
@@ -138,32 +138,25 @@ pub(crate) fn fetch_and_store_provider_labels(
     let Some(client) = http_client() else {
         return Err("Не удалось создать HTTP-клиент.".to_string());
     };
-    let snapshot = match item.source.as_str() {
-        "modrinth" => {
-            let project_id = item
-                .modrinth_id
-                .as_deref()
-                .ok_or_else(|| "У мода нет Modrinth ID.".to_string())?;
-            fetch_modrinth_labels(&client, project_id, item.modrinth_version_id.as_deref())?
+    let snapshot = if let Some(project_id) = item.modrinth_id.as_deref() {
+        fetch_modrinth_labels(&client, project_id, item.modrinth_version_id.as_deref())?
+    } else if item.source.as_str() == "curseforge" {
+        if settings.curseforge_api_key.trim().is_empty() {
+            return Err("Для CurseForge нужен API key.".to_string());
         }
-        "curseforge" => {
-            if settings.curseforge_api_key.trim().is_empty() {
-                return Err("Для CurseForge нужен API key.".to_string());
-            }
-            let project_id = item
-                .curseforge_id
-                .as_deref()
-                .ok_or_else(|| "У мода нет CurseForge ID.".to_string())?;
-            fetch_curseforge_labels(
-                &client,
-                &settings.curseforge_api_key,
-                project_id,
-                item.curseforge_file_id.as_deref(),
-            )?
-        }
-        _ => {
-            return Err("Метки поставщика доступны только для Modrinth и CurseForge.".to_string());
-        }
+        let project_id = item
+            .curseforge_id
+            .as_deref()
+            .ok_or_else(|| "У мода нет CurseForge ID.".to_string())?;
+        fetch_curseforge_labels(
+            &client,
+            &settings.curseforge_api_key,
+            project_id,
+            item.curseforge_file_id.as_deref(),
+            None,
+        )?
+    } else {
+        return Err("Метки поставщика доступны только для Modrinth и CurseForge.".to_string());
     };
     tag.provider_labels = snapshot;
     tag.updated_at = now_iso();
@@ -176,6 +169,53 @@ fn stored_side(tag: &ModTags) -> String {
     } else {
         tag.side.as_str()
     })
+}
+
+pub(crate) fn link_modrinth_ids_for_curseforge_mods(
+    client: &reqwest::blocking::Client,
+    curseforge_api_key: &str,
+    tags: &mut crate::tags::TagFile,
+    mods: &[ModEntry],
+) -> bool {
+    let mut changed = false;
+    for item in mods {
+        let Some(curseforge_id) = item.curseforge_id.as_deref() else {
+            continue;
+        };
+        let tag = tags.mods.entry(item.key.clone()).or_default();
+        if !tag.modrinth_id.is_empty() {
+            continue;
+        }
+        let mut slug = if !tag.curseforge_slug.is_empty() {
+            tag.curseforge_slug.clone()
+        } else {
+            String::new()
+        };
+        if slug.is_empty() && !curseforge_api_key.trim().is_empty() {
+            if let Some(info) = curseforge_mod_info(client, curseforge_api_key, curseforge_id) {
+                slug = info.slug.unwrap_or_default();
+                if !slug.is_empty() && tag.curseforge_slug.is_empty() {
+                    tag.curseforge_slug = slug.clone();
+                }
+            }
+        }
+        if slug.is_empty() {
+            continue;
+        }
+        let Some(project) = modrinth_project(client, &slug) else {
+            continue;
+        };
+        let Some(project_id) = json_string(project.get("id")) else {
+            continue;
+        };
+        tag.modrinth_id = project_id;
+        tag.updated_at = now_iso();
+        changed = true;
+    }
+    if changed {
+        tags.updated_at = now_iso();
+    }
+    changed
 }
 
 fn fetch_modrinth_labels(
@@ -227,14 +267,173 @@ fn fetch_curseforge_labels(
     api_key: &str,
     project_id: &str,
     file_id: Option<&str>,
+    modrinth_fallback: Option<&ProviderLabelsStore>,
 ) -> Result<ProviderLabelsStore, String> {
     let payload = curseforge_get(client, api_key, &format!("mods/{project_id}"))
         .ok_or_else(|| "CurseForge не вернул данные проекта.".to_string())?;
     let file_payload = file_id
         .filter(|value| !value.is_empty())
         .and_then(|id| curseforge_get(client, api_key, &format!("mods/{project_id}/files/{id}")));
-    build_curseforge_labels(&payload, file_payload.as_ref())
-        .ok_or_else(|| "CurseForge вернул пустой ответ.".to_string())
+    let store = build_curseforge_labels(&payload, file_payload.as_ref())
+        .ok_or_else(|| "CurseForge вернул пустой ответ.".to_string())?;
+
+    if !curseforge_side_is_ambiguous(&store) {
+        return Ok(store);
+    }
+
+    let mut store = finalize_curseforge_labels(store, modrinth_fallback, Some(&payload), None);
+    if curseforge_side_is_ambiguous(&store) {
+        let files_payload =
+            curseforge_get(client, api_key, &format!("mods/{project_id}/files?pageSize=50"));
+        store = finalize_curseforge_labels(store, None, None, files_payload.as_ref());
+    }
+    Ok(store)
+}
+
+#[derive(Clone, Copy, Default)]
+struct CurseforgeSideTags {
+    client: bool,
+    server: bool,
+}
+
+fn curseforge_side_tags_from_game_versions(game_versions: &[String]) -> CurseforgeSideTags {
+    let mut tags = CurseforgeSideTags::default();
+    for version in game_versions {
+        if version.eq_ignore_ascii_case("client") {
+            tags.client = true;
+        } else if version.eq_ignore_ascii_case("server") {
+            tags.server = true;
+        }
+    }
+    tags
+}
+
+fn curseforge_side_tags_from_file(file: &serde_json::Value) -> CurseforgeSideTags {
+    let mut tags = curseforge_side_tags_from_game_versions(&json_string_array(file.get("gameVersions")));
+    if let Some(items) = file.get("sortableGameVersions").and_then(|value| value.as_array()) {
+        for item in items {
+            let name = item
+                .get("gameVersionName")
+                .or_else(|| item.get("gameVersion"))
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            if name.eq_ignore_ascii_case("client") {
+                tags.client = true;
+            } else if name.eq_ignore_ascii_case("server") {
+                tags.server = true;
+            }
+        }
+    }
+    tags
+}
+
+fn merge_curseforge_side_tags(into: &mut CurseforgeSideTags, other: CurseforgeSideTags) {
+    into.client |= other.client;
+    into.server |= other.server;
+}
+
+fn infer_curseforge_side_from_file_entries(
+    files: &[serde_json::Value],
+) -> Option<(String, String)> {
+    let mut tags = CurseforgeSideTags::default();
+    for file in files {
+        merge_curseforge_side_tags(&mut tags, curseforge_side_tags_from_file(file));
+    }
+    if !tags.client && !tags.server {
+        return None;
+    }
+    Some(curseforge_sides_from_tags(tags))
+}
+
+fn curseforge_sides_from_tags(tags: CurseforgeSideTags) -> (String, String) {
+    match (tags.client, tags.server) {
+        (true, false) => ("required".to_string(), "unsupported".to_string()),
+        (false, true) => ("unsupported".to_string(), "required".to_string()),
+        (true, true) => ("required".to_string(), "required".to_string()),
+        (false, false) => (String::new(), String::new()),
+    }
+}
+
+pub(crate) fn curseforge_side_is_ambiguous(store: &ProviderLabelsStore) -> bool {
+    store.client_side.is_empty() && store.server_side.is_empty()
+        || (store.client_side == "optional" && store.server_side == "optional")
+}
+
+fn provider_side_is_definitive(store: &ProviderLabelsStore) -> bool {
+    !store.client_side.is_empty() || !store.server_side.is_empty()
+}
+
+fn infer_curseforge_side_from_project_files(
+    payload: &serde_json::Value,
+) -> Option<(String, String)> {
+    if let Some(files) = payload.get("data").and_then(|value| value.as_array()) {
+        return infer_curseforge_side_from_file_entries(files);
+    }
+    None
+}
+
+fn infer_curseforge_side_from_project_data(
+    project_data: &serde_json::Value,
+) -> Option<(String, String)> {
+    let mut tags = CurseforgeSideTags::default();
+    for key in ["latestFiles", "latestEarlyAccessFilesIndexes"] {
+        if let Some(files) = project_data.get(key).and_then(|value| value.as_array()) {
+            for file in files {
+                merge_curseforge_side_tags(&mut tags, curseforge_side_tags_from_file(file));
+            }
+        }
+    }
+    if !tags.client && !tags.server {
+        return None;
+    }
+    Some(curseforge_sides_from_tags(tags))
+}
+
+fn apply_curseforge_optional_side_default(store: &mut ProviderLabelsStore) {
+    if store.client_side.is_empty() && store.server_side.is_empty() {
+        store.client_side = "optional".to_string();
+        store.server_side = "optional".to_string();
+    }
+}
+
+pub(crate) fn finalize_curseforge_labels(
+    mut store: ProviderLabelsStore,
+    modrinth_fallback: Option<&ProviderLabelsStore>,
+    project_payload: Option<&serde_json::Value>,
+    project_files_payload: Option<&serde_json::Value>,
+) -> ProviderLabelsStore {
+    if !curseforge_side_is_ambiguous(&store) {
+        return store;
+    }
+
+    if let Some(mr) = modrinth_fallback {
+        if provider_side_is_definitive(mr) {
+            store.client_side = mr.client_side.clone();
+            store.server_side = mr.server_side.clone();
+            if !curseforge_side_is_ambiguous(&store) {
+                return store;
+            }
+        }
+    }
+
+    if let Some(project_data) = project_payload.and_then(|value| value.get("data")) {
+        if let Some((client, server)) = infer_curseforge_side_from_project_data(project_data) {
+            store.client_side = client;
+            store.server_side = server;
+            return store;
+        }
+    }
+
+    if let Some((client, server)) = project_files_payload
+        .and_then(infer_curseforge_side_from_project_files)
+    {
+        store.client_side = client;
+        store.server_side = server;
+        return store;
+    }
+
+    apply_curseforge_optional_side_default(&mut store);
+    store
 }
 
 pub(crate) fn build_curseforge_labels(
@@ -266,14 +465,18 @@ pub(crate) fn build_curseforge_labels(
     let file_data = file.and_then(|value| value.get("data"));
 
     if let Some(file) = file_data {
+        let file_tags = curseforge_side_tags_from_file(file);
+        if file_tags.client {
+            client_side = "required".to_string();
+        }
+        if file_tags.server {
+            server_side = "required".to_string();
+        }
         for version in json_string_array(file.get("gameVersions")) {
-            if version.eq_ignore_ascii_case("client") {
-                client_side = "required".to_string();
-            } else if version.eq_ignore_ascii_case("server") {
-                server_side = "required".to_string();
-            } else {
-                push_unique(&mut game_versions, version);
+            if version.eq_ignore_ascii_case("client") || version.eq_ignore_ascii_case("server") {
+                continue;
             }
+            push_unique(&mut game_versions, version);
         }
         if let Some(indexes) = data.get("latestFilesIndexes").and_then(|v| v.as_array()) {
             if let Some(file_id) = file.get("id").and_then(|v| v.as_i64()) {
@@ -293,10 +496,7 @@ pub(crate) fn build_curseforge_labels(
         }
     }
 
-    if client_side.is_empty() && server_side.is_empty() {
-        client_side = "optional".to_string();
-        server_side = "optional".to_string();
-    } else if client_side == "required" && server_side.is_empty() {
+    if client_side == "required" && server_side.is_empty() {
         server_side = "unsupported".to_string();
     } else if server_side == "required" && client_side.is_empty() {
         client_side = "unsupported".to_string();
@@ -458,5 +658,76 @@ mod tests {
         assert_eq!(store.client_side, "unsupported");
         assert_eq!(store.server_side, "required");
         assert_eq!(map_provider_side(&store).as_deref(), Some("server"));
+    }
+
+    #[test]
+    fn maps_curseforge_sounds_neoforge_via_project_files() {
+        let project = serde_json::json!({ "data": { "categories": [] } });
+        let file = serde_json::json!({
+            "data": {
+                "id": 7218618,
+                "gameVersions": ["1.21", "1.21.1", "NeoForge"]
+            }
+        });
+        let project_files = serde_json::json!({
+            "data": [
+                {
+                    "gameVersions": ["1.21", "1.21.1", "NeoForge"]
+                },
+                {
+                    "gameVersions": ["Client", "Fabric", "26.1", "26.1.1"]
+                }
+            ]
+        });
+        let store = build_curseforge_labels(&project, Some(&file)).expect("labels");
+        assert!(curseforge_side_is_ambiguous(&store));
+        let store = finalize_curseforge_labels(store, None, None, Some(&project_files));
+        assert_eq!(store.client_side, "required");
+        assert_eq!(store.server_side, "unsupported");
+        assert_eq!(map_provider_side(&store).as_deref(), Some("client"));
+    }
+
+    #[test]
+    fn maps_curseforge_sounds_neoforge_via_modrinth_fallback() {
+        let project = serde_json::json!({ "data": { "categories": [] } });
+        let file = serde_json::json!({
+            "data": {
+                "id": 7218618,
+                "gameVersions": ["1.21", "1.21.1", "NeoForge"]
+            }
+        });
+        let modrinth = ProviderLabelsStore {
+            fetched_at: now_iso(),
+            source: "modrinth".to_string(),
+            client_side: "required".to_string(),
+            server_side: "unsupported".to_string(),
+            ..Default::default()
+        };
+        let store = build_curseforge_labels(&project, Some(&file)).expect("labels");
+        let store = finalize_curseforge_labels(store, Some(&modrinth), None, None);
+        assert_eq!(store.client_side, "required");
+        assert_eq!(store.server_side, "unsupported");
+        assert_eq!(map_provider_side(&store).as_deref(), Some("client"));
+    }
+
+    #[test]
+    fn maps_curseforge_client_only_from_sortable_game_versions() {
+        let project = serde_json::json!({ "data": { "categories": [] } });
+        let file = serde_json::json!({
+            "data": {
+                "id": 7806535,
+                "gameVersions": ["Fabric", "26.1", "26.1.1", "26.1.2"],
+                "sortableGameVersions": [
+                    {
+                        "gameVersionName": "Client",
+                        "gameVersionTypeId": 75208
+                    }
+                ]
+            }
+        });
+        let store = build_curseforge_labels(&project, Some(&file)).expect("labels");
+        assert_eq!(store.client_side, "required");
+        assert_eq!(store.server_side, "unsupported");
+        assert_eq!(map_provider_side(&store).as_deref(), Some("client"));
     }
 }

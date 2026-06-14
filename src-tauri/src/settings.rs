@@ -12,6 +12,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_server_os() -> String {
+    "auto".to_string()
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ServerSyncSettings {
@@ -25,6 +29,12 @@ pub(crate) struct ServerSyncSettings {
     pub distribution_mods_path: String,
     #[serde(default = "default_true")]
     pub delete_extra_remote_jars: bool,
+    #[serde(default = "default_server_os")]
+    pub server_os: String,
+    #[serde(default)]
+    pub server_start_script: String,
+    #[serde(default)]
+    pub server_root_path: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

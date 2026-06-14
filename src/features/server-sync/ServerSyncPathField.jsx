@@ -1,5 +1,6 @@
 import { ArrowRight, Check, RefreshCw, X } from 'lucide-react';
 import { IconButton } from '../../components/Button.jsx';
+import { ServerSyncDoneStats } from './ServerSyncDoneStats.jsx';
 import { ServerSyncPreviewDeleteStat } from './preview/ServerSyncPreviewDeleteStat.jsx';
 import { ServerSyncPreviewUpdateStat } from './preview/ServerSyncPreviewUpdateStat.jsx';
 import { ServerSyncPreviewUploadStat } from './preview/ServerSyncPreviewUploadStat.jsx';
@@ -15,6 +16,7 @@ export function ServerSyncPathField({
   laneUi,
   previewUi,
   showResult,
+  actionUi = null,
   onChange,
   onBlur,
   onAction,
@@ -39,9 +41,29 @@ export function ServerSyncPathField({
     previewUi.ready && previewUi.ok && !previewUi.error && !previewUpToDate
   );
   const ActionIcon =
-    doneDismissible || previewUpToDate ? Check : confirmReady ? ArrowRight : RefreshCw;
+    actionUi?.icon ??
+    (doneDismissible || previewUpToDate ? Check : confirmReady ? ArrowRight : RefreshCw);
   const actionLabel =
-    doneDismissible || previewUpToDate ? 'Готово' : confirmReady ? 'Отправить' : 'Проверить';
+    actionUi?.label ??
+    (doneDismissible || previewUpToDate ? 'Готово' : confirmReady ? 'Отправить' : 'Проверить');
+  const actionClassName = actionUi
+    ? [actionUi.className].filter(Boolean).join(' ')
+    : [
+        laneUi.syncing || previewUi.checking || previewUi.starting
+          ? 'serverSyncPathSyncBtn--spinning'
+          : '',
+        previewUpToDate || doneDismissible || (confirmReady && !previewWillUpload)
+          ? 'serverSyncPathSyncBtn--confirm'
+          : '',
+        confirmReady && (previewWillUpload || previewWillUpdate)
+          ? 'serverSyncPathSyncBtn--confirmUpload'
+          : ''
+      ]
+        .filter(Boolean)
+        .join(' ');
+  const actionDisabled =
+    actionUi?.disabled ??
+    (syncDisabled || laneUi.syncing || previewUi.checking || previewUi.starting);
 
   const hasDeterminateProgress =
     laneUi.syncing && laneUi.phase === 'uploading' && laneUi.total > 0;
@@ -119,17 +141,19 @@ export function ServerSyncPathField({
               <div className="serverSyncPathOverlayRow">
                 {showDoneResult ? (
                   <>
-                    <span className="serverSyncPathOverlayText serverSyncPathOverlayUploaded">
-                      {laneUi.doneParts.uploaded}
+                    <span className="serverSyncPathOverlayText">
+                      {laneUi.doneParts.title}
                     </span>
-                    {laneUi.doneParts.skipped ? (
-                      <span className="serverSyncPathOverlaySkipped">
-                        {laneUi.doneParts.skipped}
-                      </span>
-                    ) : null}
-                    {laneUi.doneParts.extra ? (
-                      <span className="serverSyncPathOverlaySide">{laneUi.doneParts.extra}</span>
-                    ) : null}
+                    <ServerSyncDoneStats
+                      uploadCount={laneUi.doneParts.uploadCount}
+                      updateCount={laneUi.doneParts.updateCount}
+                      deleteCount={laneUi.doneParts.deleteCount}
+                      skipCount={laneUi.doneParts.skipCount}
+                      uploadFiles={laneUi.doneParts.uploadFiles}
+                      skipFiles={laneUi.doneParts.skipFiles}
+                      deleteFiles={laneUi.doneParts.deleteFiles}
+                      updatePairs={laneUi.doneParts.updatePairs}
+                    />
                   </>
                 ) : showPreviewOverlay && previewUi.previewParts ? (
                   <>
@@ -208,25 +232,17 @@ export function ServerSyncPathField({
         <IconButton
           icon={ActionIcon}
           label={actionLabel}
-          className={[
-            laneUi.syncing || previewUi.checking || previewUi.starting
-              ? 'serverSyncPathSyncBtn--spinning'
-              : '',
-            previewUpToDate || doneDismissible || (confirmReady && !previewWillUpload)
-              ? 'serverSyncPathSyncBtn--confirm'
-              : '',
-            confirmReady && (previewWillUpload || previewWillUpdate) ? 'serverSyncPathSyncBtn--confirmUpload' : ''
-          ]
-            .filter(Boolean)
-            .join(' ')}
+          className={actionClassName}
           onMouseDown={(event) => event.preventDefault()}
           onClick={onAction}
-          disabled={syncDisabled || laneUi.syncing || previewUi.checking || previewUi.starting}
+          disabled={actionDisabled}
         />
       </div>
-      <p className={hintClassName} title={hintText}>
-        {hintText}
-      </p>
+      {hint ? (
+        <p className={hintClassName} title={hintText}>
+          {hintText}
+        </p>
+      ) : null}
     </div>
   );
 }
