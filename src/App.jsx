@@ -21,7 +21,7 @@ import {
 } from './api.js';
 import { CatalogInstallDialog } from './features/catalog/CatalogInstallDialog.jsx';
 import { CatalogSearchPanel } from './features/catalog/CatalogSearchPanel.jsx';
-import { isCatalogItemInstalled } from './features/catalog/catalogInstalledStatus.js';
+import { collectInstalledProjectIds, isCatalogItemInstalled } from './features/catalog/catalogInstalledStatus.js';
 import { useCatalogSearch } from './features/catalog/useCatalogSearch.js';
 import { AppToolbar } from './components/AppToolbar.jsx';
 import { StatsBar } from './components/StatsBar.jsx';
@@ -407,17 +407,13 @@ function App() {
     updatesSnapshot
   });
 
-  const catalogInstalledProjectIdsBySource = useMemo(() => {
-    const bySource = {
-      modrinth: new Set(),
-      curseforge: new Set()
-    };
-    mods.forEach((mod) => {
-      if (mod.modrinthId) bySource.modrinth.add(String(mod.modrinthId));
-      if (mod.curseforgeId) bySource.curseforge.add(String(mod.curseforgeId));
-    });
-    return bySource;
-  }, [mods]);
+  const catalogInstalledProjectIdsBySource = useMemo(
+    () => ({
+      modrinth: collectInstalledProjectIds(mods, 'modrinth'),
+      curseforge: collectInstalledProjectIds(mods, 'curseforge')
+    }),
+    [mods]
+  );
 
   const catalogInstalledProjectIds =
     catalogInstalledProjectIdsBySource[catalogSource] ?? catalogInstalledProjectIdsBySource.modrinth;
