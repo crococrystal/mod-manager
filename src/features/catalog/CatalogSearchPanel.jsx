@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { Check, LoaderCircle } from 'lucide-react';
 import { ModCover } from '../mods/ModCover.jsx';
 import { sourceIcons, UpdatesCurrentState } from '../../lib/modMeta.jsx';
@@ -58,6 +58,8 @@ export function CatalogSearchPanel({
   hasMore = false,
   error,
   query,
+  scrollKey,
+  initialScrollTop = 0,
   installedProjectIds,
   installedMods = [],
   modForItem,
@@ -70,7 +72,8 @@ export function CatalogSearchPanel({
   onSelect,
   onSelectDrag,
   onContextMenu,
-  onLoadMore
+  onLoadMore,
+  onScrollPositionChange
 }) {
   const isUpdates = source === 'updates';
   const providerLabel = isUpdates ? 'Обновления' : (sourceIcons[source]?.label ?? 'Каталог');
@@ -80,6 +83,19 @@ export function CatalogSearchPanel({
   const showUpdatesLoadingCenter = isUpdates && loading && !showList;
   const listRef = useRef(null);
   const selectedDockRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (!showList || !listRef.current) return;
+    listRef.current.scrollTop = initialScrollTop;
+  }, [initialScrollTop, scrollKey, showList]);
+
+  const handleListScroll = useCallback(
+    (event) => {
+      const scrollTop = event.currentTarget.scrollTop;
+      onScrollPositionChange?.(scrollKey, scrollTop);
+    },
+    [onScrollPositionChange, scrollKey]
+  );
 
   const { dragSelecting, handleRowMouseDown, handleRowMouseEnter, handleRowClick } = useTableDragSelect({
     enabled: isUpdates,
@@ -191,6 +207,7 @@ export function CatalogSearchPanel({
           <div
             ref={listRef}
             className={`tableWrap scrollArea${dragSelecting ? ' tableWrapDragSelecting' : ''}`}
+            onScroll={handleListScroll}
           >
             <table className="updatesModTable">
               <tbody>
@@ -216,7 +233,7 @@ export function CatalogSearchPanel({
             </table>
           </div>
         ) : (
-          <div ref={listRef} className="tableWrap scrollArea">
+          <div ref={listRef} className="tableWrap scrollArea" onScroll={handleListScroll}>
             <ul className="catalogSearchList">
               {results.map((item) => {
                 const installedIndicator = resolveCatalogInstalledIndicator({

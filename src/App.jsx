@@ -294,6 +294,7 @@ function App() {
   const syncingRef = useRef(false);
   const sourceIdentifyRunRef = useRef(0);
   const suppressModAutoSelectRef = useRef(false);
+  const catalogScrollPositionsRef = useRef(new Map());
   const startupUpdateCheckedRef = useRef(false);
   const updater = useAppUpdater();
 
@@ -422,6 +423,13 @@ function App() {
 
   const catalogInstalledProjectIds =
     catalogInstalledProjectIdsBySource[catalogSource] ?? catalogInstalledProjectIdsBySource.modrinth;
+  const catalogScrollKey = catalogSource ? `${catalogSource}\u0000${query.trim()}` : '';
+  const catalogScrollTop = catalogScrollPositionsRef.current.get(catalogScrollKey) ?? 0;
+
+  const handleCatalogScrollPositionChange = useCallback((key, scrollTop) => {
+    if (!key) return;
+    catalogScrollPositionsRef.current.set(key, scrollTop);
+  }, []);
 
   const catalogInstallInstalledStateKey = useMemo(
     () =>
@@ -1415,7 +1423,6 @@ function App() {
           next.mods?.find((mod) => mod.key === result?.mainKey) ?? next.mods?.[0] ?? null;
         if (installed) {
           setSelected(installed);
-          resetCatalogSearch();
         }
         setInfo('Мод установлен.');
       } catch (err) {
@@ -1424,7 +1431,7 @@ function App() {
         setBusy(false);
       }
     },
-    [applyPayload, closeCatalogInstall, resetCatalogSearch]
+    [applyPayload, closeCatalogInstall]
   );
   const handleSelectMod = useCallback(
     (mod) => {
@@ -1637,6 +1644,8 @@ function App() {
                   updatesReady={updatesReady && !updatesInitBlocked}
                   updatesLoading={updatesLoadingVisible}
                   query={query}
+                  scrollKey={catalogScrollKey}
+                  initialScrollTop={catalogScrollTop}
                   installedProjectIds={catalogInstalledProjectIds}
                   installedMods={mods}
                   modForItem={catalogModForItem}
@@ -1667,6 +1676,7 @@ function App() {
                       : undefined
                   }
                   onLoadMore={catalogSource === 'updates' ? undefined : loadMoreCatalogResults}
+                  onScrollPositionChange={handleCatalogScrollPositionChange}
                 />
               </div>
             ) : (

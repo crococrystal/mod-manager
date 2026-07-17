@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.16 - 2026-07-18
+
+- Keep catalog search open after installing a mod instead of returning to the installed-mods list.
+- Preserve the catalog scroll position for each provider and search query during the session.
+
 ## 0.5.9 - 2026-06-04
 
 - Added catalog search and install flow for Modrinth and CurseForge projects, including project details, dependency preview, and installed-state handling.
