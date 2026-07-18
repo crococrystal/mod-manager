@@ -50,6 +50,8 @@ pub(crate) struct Settings {
     pub auto_prefetch_dependencies: bool,
     #[serde(default = "default_true")]
     pub auto_check_updates: bool,
+    #[serde(default = "default_true")]
+    pub include_automodpack_mods: bool,
     #[serde(default)]
     pub recent_instances: Vec<String>,
     #[serde(default)]
@@ -64,6 +66,7 @@ impl Default for Settings {
             auto_prefetch_covers: true,
             auto_prefetch_dependencies: true,
             auto_check_updates: true,
+            include_automodpack_mods: true,
             recent_instances: Vec::new(),
             server_sync: ServerSyncSettings::default(),
         }
@@ -81,6 +84,7 @@ pub(crate) struct SettingsView {
     pub auto_prefetch_covers: bool,
     pub auto_prefetch_dependencies: bool,
     pub auto_check_updates: bool,
+    pub include_automodpack_mods: bool,
     pub recent_instances: Vec<String>,
     pub server_sync: ServerSyncSettings,
     pub cache_status: Option<instance_registry::InstanceCacheStatus>,
@@ -256,6 +260,44 @@ fn discover_automodpack_mods_dirs(minecraft_dir: &Path) -> Vec<PathBuf> {
     dirs
 }
 
+fn automodpack_is_active(mods_dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(mods_dir) else {
+        return false;
+    };
+
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            file_type.is_file().then(|| entry.file_name())
+        })
+        .filter_map(|name| name.to_str().map(str::to_ascii_lowercase))
+        .any(|name| name.starts_with("automodpack") && name.ends_with(".jar"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_only_an_active_automodpack_jar() {
+        let directory = std::env::temp_dir().join(format!(
+            "mod-manager-automodpack-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+
+        fs::write(directory.join("automodpack-neoforge.jar.disable"), b"").unwrap();
+        assert!(!automodpack_is_active(&directory));
+
+        fs::write(directory.join("AutoModPack-neoforge.jar"), b"").unwrap();
+        assert!(automodpack_is_active(&directory));
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+}
+
 pub(crate) fn app_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -352,7 +394,15 @@ pub(crate) fn resolve_paths(settings: &Settings) -> Result<InstancePaths, String
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| instance_root.clone());
-    let extra_mods_dirs = discover_automodpack_mods_dirs(&minecraft_dir);
+    // AutoModPack keeps server-managed mods in a cache below minecraft/automodpack.
+    // They are only active while the AutoModPack jar itself is active. Scanning them
+    // unconditionally makes removed or disabled server mods look installed.
+    let extra_mods_dirs = if settings.include_automodpack_mods && automodpack_is_active(&mods_dir)
+    {
+        discover_automodpack_mods_dirs(&minecraft_dir)
+    } else {
+        Vec::new()
+    };
 
     Ok(InstancePaths {
         instance_root: instance_root.clone(),
@@ -392,6 +442,7 @@ pub(crate) fn settings_view(app: &AppHandle, settings: Settings) -> Result<Setti
         auto_prefetch_covers: settings.auto_prefetch_covers,
         auto_prefetch_dependencies: settings.auto_prefetch_dependencies,
         auto_check_updates: settings.auto_check_updates,
+        include_automodpack_mods: settings.include_automodpack_mods,
         recent_instances: settings.recent_instances.clone(),
         server_sync: settings.server_sync.clone(),
         cache_status,

@@ -54,8 +54,11 @@ export function refreshUpdateCandidateSummary(candidate, mod, cacheScope) {
 }
 
 export function syncUpdateCandidatesList(candidates, modsByKey, cacheScope) {
+  const seen = new Set();
   return candidates.flatMap((candidate) => {
     const key = candidate.key ?? candidate.id;
+    if (!key || seen.has(key)) return [];
+    seen.add(key);
     const mod = modsByKey.get(key);
     if (!modNeedsUpdate(mod, cacheScope)) return [];
     return [refreshUpdateCandidateSummary(candidate, mod, cacheScope)];

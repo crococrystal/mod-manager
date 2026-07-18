@@ -2262,7 +2262,7 @@ dependencies = [
 
 [[package]]
 name = "mod-manager"
-version = "0.5.16"
+version = "0.5.18"
 dependencies = [
  "base64 0.22.1",
  "chrono",

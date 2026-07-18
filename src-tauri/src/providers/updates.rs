@@ -113,7 +113,7 @@ pub(crate) fn check_mod_updates_blocking(
     let scope = paths.instance_root.to_string_lossy().to_string();
     let target = detect_instance_target(&paths);
     let catalog_root = catalog::catalog_root(app).ok();
-    let mods = scan_mods_for_settings(&settings, catalog_root)?;
+    let mods = canonical_mods_for_updates(scan_mods_for_settings(&settings, catalog_root)?);
     let fingerprint = mods_fingerprint(&mods);
 
     if !force_refresh {
@@ -158,6 +158,33 @@ pub(crate) fn check_mod_updates_blocking(
         let _ = invalidate_cached_updates(app, &scope);
     }
     Ok(response)
+}
+
+/// Keeps one installed representation of each mod in the update checker.
+/// A disabled older jar may be retained on disk next to the active jar; it must
+/// not produce a second update entry or override the active version.
+fn canonical_mods_for_updates(mods: Vec<ModEntry>) -> Vec<ModEntry> {
+    let mut canonical = Vec::<ModEntry>::new();
+    let mut positions = HashMap::<String, usize>::new();
+
+    for item in mods {
+        let key = item.key.clone();
+        let Some(&position) = positions.get(&key) else {
+            positions.insert(key, canonical.len());
+            canonical.push(item);
+            continue;
+        };
+
+        let current = &canonical[position];
+        let prefer_item = (current.disabled && !item.disabled)
+            || (current.disabled == item.disabled && item.modified_at > current.modified_at);
+        if prefer_item {
+            canonical[position] = item;
+        }
+    }
+
+    canonical.sort_by(|left, right| left.filename.cmp(&right.filename));
+    canonical
 }
 
 fn response_from_cache_hit(hit: UpdatesCacheHit) -> CheckModUpdatesResponse {
@@ -609,5 +636,24 @@ mod tests {
     fn retryable_fetch_error_detects_rate_limit() {
         assert!(is_retryable_fetch_error("HTTP 429 Too Many Requests"));
         assert!(!is_retryable_fetch_error("Modrinth вернул неожиданный ответ."));
+    }
+
+    #[test]
+    fn update_checks_prefer_the_active_copy_of_a_mod() {
+        let mut disabled = sample_mod();
+        disabled.key = "same-project".to_string();
+        disabled.filename = "mod-1.0.0.jar".to_string();
+        disabled.disabled = true;
+        disabled.modified_at = "2026-07-17T10:00:00Z".to_string();
+
+        let mut active = disabled.clone();
+        active.filename = "mod-2.0.0.jar".to_string();
+        active.disabled = false;
+        active.modified_at = "2026-07-18T10:00:00Z".to_string();
+
+        let mods = canonical_mods_for_updates(vec![disabled, active]);
+        assert_eq!(mods.len(), 1);
+        assert_eq!(mods[0].filename, "mod-2.0.0.jar");
+        assert!(!mods[0].disabled);
     }
 }

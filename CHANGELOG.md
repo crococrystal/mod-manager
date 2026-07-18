@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.18 - 2026-07-18
+
+- Added a setting to include or ignore AutoModPack-managed mod folders.
+- AutoModPack cache folders are now ignored when the AutoModPack jar is disabled, so server-only cached mods no longer appear as installed.
+- Fixed duplicate update entries and invalidated stale update-cache data from removed or disabled mod jars.
+
 ## 0.5.16 - 2026-07-18
 
 - Keep catalog search open after installing a mod instead of returning to the installed-mods list.

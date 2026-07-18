@@ -18,6 +18,7 @@ function toSettings(draft) {
       autoPrefetchCovers: true,
       autoPrefetchDependencies: true,
       autoCheckUpdates: draft.autoCheckUpdates ?? true,
+      includeAutoModpackMods: draft.includeAutoModpackMods ?? true,
       recentInstances: draft.recentInstances ?? []
     },
     draft
@@ -181,6 +182,13 @@ export function SettingsDialog({
     await onSave(toSettings(next), { bootstrap: false, scan: false });
   }
 
+  async function saveIncludeAutoModpackMods(enabled) {
+    const next = { ...draft, includeAutoModpackMods: enabled };
+    setDraft(next);
+    setMessage('');
+    await onSave(toSettings(next), { bootstrap: false });
+  }
+
   function toggleSyncOption(key) {
     setSyncOptions((current) => ({ ...current, [key]: !current[key] }));
   }
@@ -300,6 +308,16 @@ export function SettingsDialog({
                 Выбрать
               </Button>
             </div>
+          </label>
+
+          <label className="settingsToggleRow" title="Учитывать моды из minecraft/automodpack/modpacks только когда AutoModPack включён">
+            <input
+              type="checkbox"
+              checked={draft.includeAutoModpackMods ?? true}
+              disabled={packLocked}
+              onChange={(event) => saveIncludeAutoModpackMods(event.target.checked)}
+            />
+            <span>Учитывать папки AutoModPack</span>
           </label>
 
           {recent.length ? (

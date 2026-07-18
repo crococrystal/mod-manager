@@ -43,7 +43,7 @@ struct UpdatesCacheFile {
 }
 
 fn updates_cache_version() -> u8 {
-    1
+    2
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
